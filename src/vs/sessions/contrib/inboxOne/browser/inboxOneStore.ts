@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { Sequencer } from '../../../../base/common/async.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IObservable, ISettableObservable, observableValue } from '../../../../base/common/observable.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
@@ -52,6 +53,14 @@ export class InboxOneStore extends Disposable implements IInboxOneStore {
 	private readonly _tasks: ISettableObservable<readonly ILogicalTask[]>;
 	private _cache: ILedger = EMPTY_LEDGER;
 	private _hydrated = false;
+	/**
+	 * Serializes mutations in-process so a burst of concurrent writers (startup
+	 * backfill dispatch, the coordinator, and the learning autoruns all mutate the
+	 * one ledger key) never thrash the CAS loop. With writes applied one at a time,
+	 * each reads the just-swapped value and swaps first-try; the retry budget then
+	 * only ever absorbs genuine cross-process contention.
+	 */
+	private readonly writeSequencer = new Sequencer();
 
 	constructor(
 		@IAutomationStorageService private readonly storage: IAutomationStorageService,
@@ -87,6 +96,10 @@ export class InboxOneStore extends Disposable implements IInboxOneStore {
 	 * returning `undefined` for the ledger aborts the write and returns the result.
 	 */
 	private async mutate<T>(mutate: (ledger: ILedger) => { next?: ILedger; result: T }): Promise<T> {
+		return this.writeSequencer.queue(() => this.mutateExclusive(mutate));
+	}
+
+	private async mutateExclusive<T>(mutate: (ledger: ILedger) => { next?: ILedger; result: T }): Promise<T> {
 		await this.ensureHydrated();
 		let expected = await this.storage.read(INBOX_ONE_LEDGER_KEY);
 		let current = expected ? safeParse(expected) : { ...EMPTY_LEDGER };
