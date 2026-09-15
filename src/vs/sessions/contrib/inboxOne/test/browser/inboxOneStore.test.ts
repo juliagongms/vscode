@@ -168,6 +168,18 @@ suite('Inbox One - InboxOneStore', () => {
 		assert.strictEqual(gestures[0].kind, GestureKind.Dismiss);
 	});
 
+	test('a burst of concurrent mutations all apply without exhausting the CAS budget', async () => {
+		const store = createStore();
+		const { task } = await store.upsertByGroupKey(init());
+		// Far more concurrent writers than the CAS retry budget: without in-process
+		// serialization the losers would exceed the budget (or lose updates); with it
+		// every write lands exactly once.
+		const N = 40;
+		await Promise.all(Array.from({ length: N }, (_, i) =>
+			store.recordGesture({ taskId: task.id, kind: GestureKind.Steer, note: `n${i}`, timestamp: i })));
+		assert.strictEqual(store.getGestures(task.id).length, N);
+	});
+
 	test('Delete permanently removes the archived task', async () => {
 		const store = createStore();
 		const { task } = await store.upsertByGroupKey(init());
