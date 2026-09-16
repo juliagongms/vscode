@@ -30,10 +30,12 @@ const DEFAULT_RETRY_DELAY_MS = 1500;
  * carries the marker and fall back to the newest non-empty response.
  *
  * The read is polled with a short backoff: `getChatSessionHistory` returns the
- * live in-memory model when a session is still resolved and only falls back to a
- * fresh provider fetch once it is released, so at the exact turn-end edge the
- * marker can lag by a beat. Polling a few times absorbs that race without any
- * session-runtime coupling; the first attempt that sees the marker wins.
+ * retained session's snapshot plus its in-flight streamed turn while the session
+ * is live, and falls back to a fresh provider fetch once it is released, so at
+ * the exact turn-end edge the marker can lag by a beat. Polling a few times
+ * absorbs that race without any session-runtime coupling; the first attempt that
+ * sees the marker wins. The streamed turn is cleared by the runtime at the start
+ * of each request, so it only ever carries the current turn's output.
  */
 export async function readSessionResponseText(
 	chatSessions: IChatSessionsService,

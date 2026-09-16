@@ -1419,7 +1419,25 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 	public async getChatSessionHistory(sessionResource: URI, token: CancellationToken): Promise<readonly IChatSessionHistoryItem[]> {
 		const existing = this._sessions.get(this._resolveResource(sessionResource));
 		if (existing) {
-			return [...existing.session.history];
+			const history = [...existing.session.history];
+			// `history` is the snapshot taken when the session was resolved. While a
+			// session stays retained, the in-flight turn streams through `progressObs`
+			// and is only folded into `history` by a later provider fetch, so a live
+			// session (e.g. a background agent-host session started in this window)
+			// would otherwise read back as empty. Surface the streamed turn too.
+			const live = existing.session.progressObs?.get();
+			if (live?.length) {
+				// Attribute the streamed turn to the same participant as the session's
+				// most recent response so consumers can't tell it apart from a turn
+				// that a later provider fetch would have folded into `history`.
+				const lastResponse = history.filter(item => item.type === 'response').at(-1);
+				history.push({
+					type: 'response',
+					parts: [...live],
+					participant: lastResponse?.type === 'response' ? lastResponse.participant : existing.chatSessionType,
+				});
+			}
+			return history;
 		}
 
 		if (isUntitledChatSession(sessionResource)) {

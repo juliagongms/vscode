@@ -7,7 +7,9 @@ import assert from 'assert';
 import { DeferredPromise } from '../../../../../../base/common/async.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
+import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { toDisposable } from '../../../../../../base/common/lifecycle.js';
+import { observableValue } from '../../../../../../base/common/observable.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { ContextKeyService } from '../../../../../../platform/contextkey/browser/contextKeyService.js';
 import { ContextKeyExpr, IContextKey, RawContextKey } from '../../../../../../platform/contextkey/common/contextkey.js';
@@ -15,6 +17,7 @@ import { TestConfigurationService } from '../../../../../../platform/configurati
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { applyCodexAgentHostPreference, ChatSessionsService } from '../../../browser/chatSessions/chatSessions.contribution.js';
 import { ChatSessionOptionsMap, ChatSessionStatus, IChatSession, IChatSessionHistoryItem, IChatSessionItem, IChatSessionItemController, IChatSessionItemsDelta, IChatSessionsExtensionPoint, ReadonlyChatSessionOptionsMap, SessionType } from '../../../common/chatSessionsService.js';
+import { IChatProgress } from '../../../common/chatService/chatService.js';
 import { workbenchInstantiationService } from '../../../../../test/browser/workbenchTestServices.js';
 import { AGENT_HOST_ENABLED_CONTEXT_KEY } from '../../../../../../platform/agentHost/common/agentHostEnablementService.js';
 import { AgentHostCodexAgentEnabledSettingId, CodexPreferAgentHostEditorSettingId, GITHUB_COPILOT_PROTECTED_RESOURCE, GITHUB_REPO_PROTECTED_RESOURCE, protectedResourcesRequireGitHubCopilotSignIn } from '../../../../../../platform/agentHost/common/agentService.js';
@@ -1041,6 +1044,35 @@ suite('ChatSessionsService - lightweight history reads', () => {
 			result: history,
 			counters: { provided: 1, disposed: 0 },
 		});
+	});
+
+	test('includes the in-flight streamed turn for a retained live session', async () => {
+		const type = 'history-live';
+		const resource = URI.from({ scheme: type, path: '/session-1' });
+		const progressObs = observableValue<IChatProgress[]>('progress', []);
+		store.add(service.registerChatSessionContribution({ type, name: type, displayName: type, description: '' }));
+		store.add(service.registerChatSessionContentProvider(type, {
+			provideChatSessionContent: async sessionResource => ({
+				sessionResource,
+				// A session started in this window resolves with an empty snapshot;
+				// its turn arrives only through `progressObs`.
+				history: [],
+				progressObs,
+				onWillDispose: Event.None,
+				dispose: () => { },
+			}),
+		}));
+
+		await service.getOrCreateChatSession(resource, CancellationToken.None);
+		assert.deepStrictEqual(await service.getChatSessionHistory(resource, CancellationToken.None), []);
+
+		const part: IChatProgress = { kind: 'markdownContent', content: new MarkdownString('the worker result') };
+		progressObs.set([part], undefined);
+
+		assert.deepStrictEqual(
+			await service.getChatSessionHistory(resource, CancellationToken.None),
+			[{ type: 'response', parts: [part], participant: type }],
+		);
 	});
 
 	test('reads an aliased retained session without resolving it again', async () => {
