@@ -89,17 +89,20 @@ suite('Inbox One - role mounting', () => {
 
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('mountRoles composes only skills tagged with the requested roles', () => {
+	test('mountRoles mounts all role skills, marking the requested role as the primary lens', () => {
 		const skills = [
 			skill('triage-a', ['issue-triage'], 'AAA'),
 			skill('triage-b', ['issue-triage'], 'BBB'),
 			skill('review-x', ['code-review'], 'XXX'),
 		];
 		const result = mountRoles(['issue-triage'], skills);
-		assert.deepStrictEqual(result.skillIds, ['triage-a', 'triage-b']);
+		// All role skills mount so the worker can take the best action, not just triage.
+		assert.deepStrictEqual(result.skillIds, ['review-x', 'triage-a', 'triage-b']);
 		assert.ok(result.personaText.includes('AAA'));
-		assert.ok(result.personaText.includes('BBB'));
-		assert.ok(!result.personaText.includes('XXX'));
+		assert.ok(result.personaText.includes('XXX'));
+		// The dispatched role is highlighted as primary; the others are not.
+		assert.ok(result.personaText.includes('triage-a (primary lens)'));
+		assert.ok(!result.personaText.includes('review-x (primary lens)'));
 	});
 
 	test('mountRoles blends multiple roles', () => {
@@ -123,10 +126,13 @@ suite('Inbox One - role mounting', () => {
 		assert.ok(result.personaText.includes('prefer customer grouping'));
 	});
 
-	test('a role with no skills yields empty persona but still mounts framework', () => {
-		const result = mountRoles(['nonexistent'], [skill('t', ['issue-triage'])], { frameworkSkills: [skill('emit-result', [], 'EMIT')] });
-		assert.deepStrictEqual(result.skillIds, ['emit-result']);
+	test('requesting an unknown role still mounts all available skills plus framework', () => {
+		const result = mountRoles(['nonexistent'], [skill('t', ['issue-triage'], 'ROLE')], { frameworkSkills: [skill('emit-result', [], 'EMIT')] });
+		assert.deepStrictEqual(result.skillIds, ['t', 'emit-result']);
+		assert.ok(result.personaText.includes('ROLE'));
 		assert.ok(result.personaText.includes('EMIT'));
+		// The skill is mounted but not marked primary, since the requested role matches none.
+		assert.ok(result.personaText.includes('- t: ROLE'));
 	});
 
 	test('mounting is deterministic regardless of input order', () => {

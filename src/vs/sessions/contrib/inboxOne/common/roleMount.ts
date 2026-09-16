@@ -47,15 +47,19 @@ export interface IMountOptions {
 /**
  * Composes persona text for the requested roles from the available skills.
  *
- * Selection is deterministic: skills whose declared roles intersect the requested
- * set, ordered by skill id for stability; then any framework skills (always), then
- * tagged wiki patterns. A requested role with no skills contributes nothing (the
- * caller may still dispatch -- the brief carries the work item).
+ * All skills are mounted (not just the dispatched role's) so the worker has the
+ * full methodology set and can take the best action for the item; the dispatched
+ * role is highlighted as the primary lens. Ordered by skill id for stability;
+ * then framework skills (always), then tagged wiki patterns.
  */
 export function mountRoles(roleNames: readonly string[], skills: readonly IParsedSkill[], options: IMountOptions = {}): IMountResult {
 	const requested = new Set(roleNames);
+	// Mount ALL role skills, not just the dispatched role's, so the worker has the
+	// full methodology set (triage, implement, review, ...) and can take the best
+	// action for THIS item rather than being boxed into its dispatch lens. The
+	// dispatched role is still highlighted as the primary lens.
 	const selected = skills
-		.filter(s => s.frontmatter.roles.some(r => requested.has(r)))
+		.slice()
 		.sort((a, b) => a.frontmatter.id.localeCompare(b.frontmatter.id));
 
 	const framework = (options.frameworkSkills ?? []).slice();
@@ -71,8 +75,11 @@ export function mountRoles(roleNames: readonly string[], skills: readonly IParse
 	// ballooning as skills accumulate; only the (small, mandatory) framework output
 	// contract below is inlined in full.
 	if (selected.length) {
-		const refs = selected.map(s => `- ${s.frontmatter.id}: ${skillPurpose(s.body)}`).join('\n');
-		sections.push(`## Your skills for this task\nFocus on these role skills, attached to your session via your Skills -- open them by name for their full methodology:\n${refs}`);
+		const refs = selected.map(s => {
+			const primary = s.frontmatter.roles.some(r => requested.has(r));
+			return `- ${s.frontmatter.id}${primary ? ' (primary lens)' : ''}: ${skillPurpose(s.body)}`;
+		}).join('\n');
+		sections.push(`## Your skills for this task\nAll of these skills are attached to your session -- open any by name for its full methodology. Your dispatched lens is marked "(primary lens)", but assess THIS item and apply whichever skill fits the best action for it (triage, implement a fix, review, ...):\n${refs}`);
 		for (const skill of selected) {
 			skillIds.push(skill.frontmatter.id);
 		}
