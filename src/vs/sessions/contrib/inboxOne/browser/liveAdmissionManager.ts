@@ -68,11 +68,34 @@ export class LiveAdmissionManager implements IAdmissionManager {
 		let result = AdmissionResult.Admitted;
 		await this.mutate(state => {
 			const caps = this.settings.getBudgetCaps(repo);
-			const outcome = reservePure(state, caps, { taskId, attemptIndex, repo }, this.now());
+			const outcome = reservePure(this.pruneStaleSlots(state, taskId), caps, { taskId, attemptIndex, repo }, this.now());
 			result = outcome.result;
 			return outcome.state;
 		});
 		return result;
+	}
+
+	/**
+	 * Drops durable slots whose task is no longer running a worker. A slot is
+	 * released on resolve/cancel/fail, but any path that retires a task without
+	 * that release (an external edit, or a crash between landing and release)
+	 * would otherwise leave the slot reserved forever and permanently wedge the
+	 * repo's concurrency -- a dispatch that can only ever queue. The live store is
+	 * the source of truth for what is actually running, so reconciling the durable
+	 * set against exactly the same predicate {@link canAdmit} derives concurrency
+	 * from keeps it self-healing. `reservingTaskId` is always kept: it has a slot
+	 * but has not launched its worker yet, so reservation stays idempotent and
+	 * never spends a second credit on retry.
+	 */
+	private pruneStaleSlots(state: IAdmissionState, reservingTaskId: string): IAdmissionState {
+		const live = new Set<string>([reservingTaskId]);
+		for (const task of this.store.tasks.get()) {
+			if ((task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) && hasLiveWorker(task)) {
+				live.add(task.id);
+			}
+		}
+		const slots = state.slots.filter(s => live.has(s.taskId));
+		return slots.length === state.slots.length ? state : { ...state, slots };
 	}
 
 	private liveAttempts(): { id: string; repo?: string }[] {

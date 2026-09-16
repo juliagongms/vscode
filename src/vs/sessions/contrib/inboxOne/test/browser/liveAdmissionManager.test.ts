@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { Emitter } from '../../../../../base/common/event.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { AdmissionResult, IBudgetCaps } from '../../common/admissionControl.js';
+import { AdmissionResult, dayKey, IBudgetCaps } from '../../common/admissionControl.js';
 import { IAutomationStorageCompareAndSwapResult, IAutomationStorageService } from '../../../automations/common/automationStorageService.js';
 import { InboxOneStore } from '../../browser/inboxOneStore.js';
 import { LiveAdmissionManager } from '../../browser/liveAdmissionManager.js';
@@ -66,10 +66,10 @@ suite('Inbox One - LiveAdmissionManager', () => {
 	}
 
 	/** Create N live (Cooking, dispatched-worker) tasks in a repo. */
-	async function seedLiveTasks(store: InboxOneStore, repo: string, count: number): Promise<string[]> {
+	async function seedLiveTasks(store: InboxOneStore, repo: string, count: number, offset = 0): Promise<string[]> {
 		const ids: string[] = [];
-		for (let i = 0; i < count; i++) {
-			const { task } = await store.upsertByGroupKey({ inboxId: 'my', repo, groupKey: `${repo}:pr:${i}`, sourceEvent: ev(repo, String(i), `d${repo}${i}`), type: 'code-review', firstAttemptTrigger: AttemptTrigger.Hook });
+		for (let n = offset; n < offset + count; n++) {
+			const { task } = await store.upsertByGroupKey({ inboxId: 'my', repo, groupKey: `${repo}:pr:${n}`, sourceEvent: ev(repo, String(n), `d${repo}${n}`), type: 'code-review', firstAttemptTrigger: AttemptTrigger.Hook });
 			// A live task holds a concurrency slot only once it has a dispatched worker.
 			await store.updateTask(task.id, { sessionRef: `agent-host://worker/${task.id}` });
 			ids.push(task.id);
@@ -126,6 +126,27 @@ suite('Inbox One - LiveAdmissionManager', () => {
 		await mgr.tryReserve(id, 0, 'acme/api');
 		const state = await mgr.peek();
 		assert.strictEqual(state.creditsUsed, 1); // not double-counted
+	});
+
+	test('slots left behind by retired tasks do not wedge the repo forever', async () => {
+		// Durable state carried over from an earlier run: two slots for this repo
+		// whose tasks are gone. A slot is released on resolve/cancel/fail, but any
+		// path that retires a task without that release (an external edit, or a
+		// crash between landing and release) leaves the slot reserved forever.
+		// Two such leaks reach repoConcurrency = 2 and would queue this repo for
+		// good -- the dispatch can then only ever queue.
+		const storage = new InMemoryCasStorage();
+		const leaked = ['gone-1', 'gone-2'].map(taskId => ({ taskId, attemptIndex: 0, repo: 'acme/api' }));
+		await storage.compareAndSwap('inboxOne.admission', undefined, JSON.stringify({ slots: leaked, creditDate: dayKey(NOW), creditsUsed: 2 }));
+
+		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
+		const mgr = new LiveAdmissionManager(store, new FakeSettings(CAPS), storage, () => NOW);
+
+		// Nothing is actually running, so a new task must still be admitted: the
+		// leaked slots are reconciled against the live store, not counted.
+		const [fresh] = await seedLiveTasks(store, 'acme/api', 1);
+		assert.strictEqual(await mgr.tryReserve(fresh, 0, 'acme/api'), AdmissionResult.Admitted);
+		assert.deepStrictEqual((await mgr.peek()).slots.map(s => s.taskId), [fresh]);
 	});
 
 	test('credits reset on a new calendar day', async () => {

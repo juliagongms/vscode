@@ -299,7 +299,7 @@ export class CoordinatorEngine {
 		const attemptIndex = task.attempts[task.currentAttempt]?.index ?? 0;
 		const admission = await this.admission.tryReserve(task.id, attemptIndex, task.repo);
 		if (!isAdmitted(admission)) {
-			this.logService.trace(`[inboxOne] task ${task.id} queued: ${admission}`);
+			this.logService.info(`[inboxOne] task ${task.id} queued: ${admission}`);
 			return;
 		}
 		try {
