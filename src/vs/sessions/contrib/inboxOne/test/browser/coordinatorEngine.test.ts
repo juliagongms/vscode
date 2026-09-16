@@ -205,6 +205,45 @@ suite('Inbox One - coordinator engine', () => {
 		assert.ok(store.getTask(task.id)!.attempts[0].sessionRef?.startsWith('session://worker/'), 'now has a live worker');
 	});
 
+	test('does not double-dispatch a task whose launch is still in flight (concurrency idempotency)', async () => {
+		// Reproduces the wedge: while a launch is in flight the task has no session
+		// ref, so a concurrent pump/event re-dispatches it; the two launches race and
+		// a losing deferred launch clobbers the live ref. The in-flight guard prevents
+		// the second dispatch entirely.
+		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
+		const settings = new FakeSettings([{ repo: 'acme/api', active: true }]);
+		const admission = new FakeAdmission();
+
+		let releaseGate!: () => void;
+		const gate = new Promise<void>(res => { releaseGate = res; });
+		let calls = 0;
+		const dispatcher: IWorkerDispatcher = {
+			async dispatch(request: IWorkerDispatchRequest): Promise<IWorkerDispatchResult> {
+				calls++;
+				if (calls === 1) { await gate; } // hold the first launch in flight
+				return { sessionRef: `session://worker/${request.task.id}`, reused: false };
+			},
+			async relay(): Promise<boolean> { return true; },
+		};
+		const engine = new CoordinatorEngine('my', store, settings, admission, dispatcher, new NullLogService());
+
+		// First event creates the task and enters dispatchFor, which hangs on the gate
+		// (task Cooking, attempt has no session ref yet).
+		const p1 = engine.handleEvent(prEvent());
+		await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+		// A concurrent event pumps the queue while the first launch is still in flight.
+		await engine.handleEvent({ ...prEvent(), deliveryId: 'd2' });
+
+		releaseGate();
+		await p1;
+
+		assert.strictEqual(calls, 1, 'dispatch entered exactly once despite the concurrent pump');
+		const task = store.tasks.get()[0];
+		assert.ok(task.attempts[0].sessionRef?.startsWith('session://worker/'), 'kept the live worker ref (not clobbered)');
+		assert.strictEqual(task.state, LogicalTaskState.Cooking);
+	});
+
 	test('a needs_input session event blocks the owning task (genuine ask for the human)', async () => {
 		const { store, dispatcher, engine } = build();
 		await engine.handleEvent(prEvent());

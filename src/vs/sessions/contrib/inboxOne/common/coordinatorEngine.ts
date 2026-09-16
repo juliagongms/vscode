@@ -64,6 +64,9 @@ export class CoordinatorEngine {
 	/** Attempts for which a one-shot finalize relay has already been requested. */
 	private readonly finalizeRequested = new Set<string>();
 
+	/** Task ids whose dispatch is currently in flight (idempotency guard, see dispatchFor). */
+	private readonly dispatchInFlight = new Set<string>();
+
 	/** Processes one normalized ambient event. */
 	async handleEvent(event: IIngressEvent): Promise<void> {
 		if (event.source === EventSource.Session) {
@@ -90,7 +93,7 @@ export class CoordinatorEngine {
 			// started, so the attempt has no session ref). A deferred dispatch
 			// (pending ref, e.g. no host) is left as recorded intent, and a task with
 			// a live/pending worker is not touched.
-			if (task.state !== LogicalTaskState.Cooking || currentAttempt(task)?.sessionRef !== undefined) {
+			if (task.state !== LogicalTaskState.Cooking || currentAttempt(task)?.sessionRef !== undefined || this.dispatchInFlight.has(task.id)) {
 				continue;
 			}
 			const role = workerRoleFor(task.type);
@@ -296,33 +299,49 @@ export class CoordinatorEngine {
 	}
 
 	private async dispatchFor(task: ILogicalTask, role: WorkerRole, groupKey: GroupKey): Promise<void> {
-		const attemptIndex = task.attempts[task.currentAttempt]?.index ?? 0;
-		const admission = await this.admission.tryReserve(task.id, attemptIndex, task.repo);
-		if (!isAdmitted(admission)) {
-			this.logService.info(`[inboxOne] task ${task.id} queued: ${admission}`);
+		// Idempotency across concurrent callers: a task's dispatch runs to completion
+		// before another can start it. handleWorldEvent and pumpQueued both dispatch,
+		// and a task's attempt has no session ref until its launch RESOLVES -- so while
+		// a launch is in flight, pumpQueued (or a second concurrent event) sees the
+		// task as "Cooking, no ref" and re-dispatches it. The two launches then race,
+		// and a losing deferred/failed launch overwrites the winner's live session ref
+		// via updateTask -- orphaning the worker and wedging the task in Cooking. The
+		// synchronous check-and-add here (no await before it) closes that window.
+		if (this.dispatchInFlight.has(task.id)) {
 			return;
 		}
+		this.dispatchInFlight.add(task.id);
 		try {
-			const result = await this.dispatcher.dispatch({
-				task,
-				attemptIndex,
-				role,
-				groupKey,
-				brief: this.briefFactory(role, task),
-			});
-			if (result.deferred) {
-				// The worker could not actually start (e.g. no agent host yet): record
-				// intent but RELEASE the reserved slot so a stuck "no host" task never
-				// permanently consumes admission (design 7.4). The task stays Cooking
-				// and is re-dispatchable when a target becomes available.
-				await this.admission.release(task.id, attemptIndex, task.repo);
-				this.logService.trace(`[inboxOne] task ${task.id} dispatch deferred; admission released`);
+			const attemptIndex = task.attempts[task.currentAttempt]?.index ?? 0;
+			const admission = await this.admission.tryReserve(task.id, attemptIndex, task.repo);
+			if (!isAdmitted(admission)) {
+				this.logService.info(`[inboxOne] task ${task.id} queued: ${admission}`);
+				return;
 			}
-			await this.store.updateTask(task.id, { sessionRef: result.sessionRef });
-		} catch (err) {
-			this.logService.error(`[inboxOne] dispatch failed for task ${task.id}`, err);
-			await this.admission.release(task.id, attemptIndex, task.repo);
-			await this.store.transition(task.id, TaskTrigger.AttemptFailed);
+			try {
+				const result = await this.dispatcher.dispatch({
+					task,
+					attemptIndex,
+					role,
+					groupKey,
+					brief: this.briefFactory(role, task),
+				});
+				if (result.deferred) {
+					// The worker could not actually start (e.g. no agent host yet): record
+					// intent but RELEASE the reserved slot so a stuck "no host" task never
+					// permanently consumes admission (design 7.4). The task stays Cooking
+					// and is re-dispatchable when a target becomes available.
+					await this.admission.release(task.id, attemptIndex, task.repo);
+					this.logService.trace(`[inboxOne] task ${task.id} dispatch deferred; admission released`);
+				}
+				await this.store.updateTask(task.id, { sessionRef: result.sessionRef });
+			} catch (err) {
+				this.logService.error(`[inboxOne] dispatch failed for task ${task.id}`, err);
+				await this.admission.release(task.id, attemptIndex, task.repo);
+				await this.store.transition(task.id, TaskTrigger.AttemptFailed);
+			}
+		} finally {
+			this.dispatchInFlight.delete(task.id);
 		}
 	}
 
