@@ -423,8 +423,19 @@ export class InboxOneView extends AbstractCustomView {
 			const actions = detail.appendChild($('.inbox-one-detail-actions'));
 			const reopen = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.reopen', 'Reopen with Diffy')));
 			this._register(addClick(reopen, () => this.openInlineComposer(task, 'reopen')));
+			const open = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.openWork', 'Open')));
+			this._register(addClick(open, () => this.openWorkerSession(task)));
 			const archive = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.archiveBtn', 'Archive')));
 			this._register(addClick(archive, () => this.dismiss(task)));
+		} else if (task.state === LogicalTaskState.Archived) {
+			detail.appendChild($('.inbox-one-detail-done', undefined, localize('inboxOne.archivedNote', 'Archived. History preserved.')));
+			const actions = detail.appendChild($('.inbox-one-detail-actions'));
+			const restore = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${localize('inboxOne.restore', 'Restore')} \u25b8`));
+			this._register(addClick(restore, () => this.restore(task)));
+			const open = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.openWork', 'Open')));
+			this._register(addClick(open, () => this.openWorkerSession(task)));
+			const del = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.deleteBtn', 'Delete')));
+			this._register(addClick(del, () => this.deleteTask(task)));
 		} else if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
 			detail.appendChild($('.inbox-one-detail-done', undefined, localize('inboxOne.cookingNote', 'Diffy is working on this. Evidence will land here when ready.')));
 			const actions = detail.appendChild($('.inbox-one-detail-actions'));
@@ -585,6 +596,16 @@ export class InboxOneView extends AbstractCustomView {
 
 	private async cancelWork(task: ILogicalTask): Promise<void> {
 		await this.store.transition(task.id, TaskTrigger.CancelWork, { archiveReason: 'cancelled from inbox' });
+	}
+
+	/** Restore an archived task to its prior tier (Archived -> Decision). */
+	private async restore(task: ILogicalTask): Promise<void> {
+		await this.store.transition(task.id, TaskTrigger.Restore);
+	}
+
+	/** Permanently remove an archived task (Archived -> removed). */
+	private async deleteTask(task: ILogicalTask): Promise<void> {
+		await this.store.transition(task.id, TaskTrigger.Delete);
 	}
 
 	private renderDetailActions(task: ILogicalTask): HTMLElement {
