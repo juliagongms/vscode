@@ -54,8 +54,7 @@ export class DistillerSessionDispatcher extends Disposable {
 
 	/** Wire this as {@link LearningOrchestrator}'s `distillOne`. */
 	readonly distill = async (record: IExperienceRecord, target: LearningTarget): Promise<void> => {
-		// The role's own (non-framework) skill is the update target.
-		const skill = record.role ? (await this.fileStore.listSkills()).find(s => !s.isFramework && s.frontmatter.roles.includes(record.role!)) : undefined;
+		const skill = await this.resolveTargetSkill(record, target);
 		const brief = buildDistillerBrief(record, target, skill ? reconstructSkill(skill) : undefined);
 		const session = await this.launcher.launch(brief, {
 			title: 'Diffy distiller',
@@ -66,6 +65,23 @@ export class DistillerSessionDispatcher extends Disposable {
 			this.applyOnComplete(session, skill.frontmatter.id);
 		}
 	};
+
+	/**
+	 * Resolves the skill this target updates (design 6.2). Dismiss/rerank/snooze
+	 * say "surfacing was wrong", so they teach Diffy's own coordinator
+	 * priority/dispatch skill -- NOT the worker's role skill, which did nothing
+	 * wrong. Accept/steer teach the role skill that produced the result.
+	 */
+	private async resolveTargetSkill(record: IExperienceRecord, target: LearningTarget): Promise<IStoredSkill | undefined> {
+		const skills = await this.fileStore.listSkills();
+		if (target === LearningTarget.CoordinatorSkill) {
+			return skills.find(s => s.isCoordinator && !s.isFramework);
+		}
+		if (!record.role) {
+			return undefined;
+		}
+		return skills.find(s => !s.isFramework && !s.isCoordinator && s.frontmatter.roles.includes(record.role!));
+	}
 
 	/** One-shot: when the distiller session finishes, read + apply its proposed skill. */
 	private applyOnComplete(session: ISession, skillId: string): void {

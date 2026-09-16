@@ -37,7 +37,7 @@ function targetGuidance(target: LearningTarget): string {
  */
 export function buildDistillerBrief(record: IExperienceRecord, target: LearningTarget, currentSkill: string | undefined): string {
 	const lines: string[] = [
-		'You are the Inbox One distiller. A task just resolved; distill the lesson and, only if warranted, propose a versioned update to the skill it ran on.',
+		'You are the Inbox One distiller. A task just resolved; distill the lesson and, only if warranted, propose a versioned update to the skill shown below.',
 		'',
 		`Resolution: gesture=${record.gesture}, role=${record.role ?? 'unknown'}, repo=${record.repo ?? 'n/a'}, outcome=${record.outcome ?? 'n/a'}.`,
 		targetGuidance(target),
@@ -48,7 +48,7 @@ export function buildDistillerBrief(record: IExperienceRecord, target: LearningT
 	if (currentSkill && currentSkill.trim()) {
 		lines.push('', 'Current skill (SKILL.md):', '```', currentSkill.trim(), '```');
 	} else {
-		lines.push('', 'There is no existing skill for this role yet; you may propose a new one.');
+		lines.push('', 'There is no existing skill for this target yet; you may propose a new one.');
 	}
 	lines.push(
 		'',
