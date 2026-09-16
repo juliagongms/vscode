@@ -8,7 +8,8 @@ import { $, addDisposableListener, clearNode } from '../../../../base/browser/do
 import { autorun, constObservable, IObservable, ISettableObservable, observableValue } from '../../../../base/common/observable.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
-import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
+import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
@@ -18,7 +19,7 @@ import { buildConfirmation } from '../common/actionConfirmation.js';
 import { IActionPayloads } from '../common/actionCatalog.js';
 import { IInboxOneStore, TransitionOutcome } from '../common/inboxOneStore.js';
 import { TaskTrigger } from '../common/inboxOneStateMachine.js';
-import { ActionType, GestureKind, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
+import { ActionType, GestureKind, IEvidenceClaim, ILogicalTask, InboxOneTier, IPrimaryAction, LogicalTaskState } from '../common/inboxOneTypes.js';
 import { composeSteerRelay } from '../common/workerBrief.js';
 import { IInboxOneSessionLauncher } from './inboxOneSessionLauncher.js';
 import { IInboxOneNavigator } from './inboxOneNavigator.js';
@@ -71,7 +72,6 @@ export class InboxOneView extends AbstractCustomView {
 	private inlineComposeDraft = '';
 	private listEl: HTMLElement | undefined;
 	private detailEl: HTMLElement | undefined;
-	private confirmPanel: HTMLElement | undefined;
 	/** A task whose list row should be scrolled into view on the next render (deep-link reveal). */
 	private pendingScrollTaskId: string | undefined;
 	/** Sections the user has collapsed (design/wireframes 6: the caret collapses a section). */
@@ -84,6 +84,7 @@ export class InboxOneView extends AbstractCustomView {
 	constructor(
 		@IInboxOneStore private readonly store: IInboxOneStore,
 		@INotificationService private readonly notificationService: INotificationService,
+		@IDialogService private readonly dialogService: IDialogService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IStorageService private readonly storageService: IStorageService,
@@ -227,7 +228,6 @@ export class InboxOneView extends AbstractCustomView {
 			return;
 		}
 		clearNode(detail);
-		this.confirmPanel = undefined;
 
 		const repos = new Set(tasks.map(t => t.repo).filter(Boolean));
 		detail.appendChild($('.inbox-one-detail-tier', undefined, localize('inboxOne.coordinator', 'COORDINATOR')));
@@ -414,53 +414,27 @@ export class InboxOneView extends AbstractCustomView {
 			return;
 		}
 
-		const pack = task.evidence;
-		detail.appendChild($('.inbox-one-detail-tier', undefined, `${(task.tier ?? '').toUpperCase()} - ${task.type}`));
+		// Eyebrow leads with the attention state + readiness (not urgency + task type).
+		detail.appendChild($('.inbox-one-detail-eyebrow', undefined, this.detailEyebrow(task)));
 		detail.appendChild($('h2.inbox-one-detail-title', undefined, this.listTitle(task)));
-		if (pack?.decisionSentence) {
-			detail.appendChild($('.inbox-one-detail-summary', undefined, pack.decisionSentence));
-		}
+
+		// Meta: repo + last-updated, with a persistent "Open full session" affordance.
+		const meta = detail.appendChild($('.inbox-one-detail-meta'));
 		if (task.repo) {
-			detail.appendChild($('.inbox-one-detail-sub', undefined, `${task.repo}${pack?.freshness.headSha ? ' - head ' + pack.freshness.headSha : ''}`));
+			meta.appendChild($('span', undefined, task.repo));
+			meta.appendChild($('span.inbox-one-detail-dot-sep', undefined, '\u00b7'));
 		}
-
-		if (pack?.primaryAction) {
-			detail.appendChild($('.inbox-one-detail-accepting', undefined, this.acceptingLine(pack.primaryAction.actionType)));
-		}
-
-		if (pack?.customAsk) {
-			const ask = detail.appendChild($('.inbox-one-detail-ask'));
-			ask.appendChild($('.inbox-one-detail-ask-label', undefined, localize('inboxOne.diffyAsks', 'Diffy needs your decision:')));
-			ask.appendChild($('.inbox-one-detail-ask-body', undefined, pack.customAsk));
-		}
-
-		if (pack && pack.claims.length) {
-			const why = detail.appendChild($('.inbox-one-detail-claims'));
-			why.appendChild($('.inbox-one-detail-claims-header', undefined, localize('inboxOne.evidence', 'Evidence')));
-			for (const claim of pack.claims) {
-				const claimEl = why.appendChild($('.inbox-one-claim'));
-				claimEl.appendChild($('span.inbox-one-claim-bullet', undefined, '\u2022'));
-				claimEl.appendChild($('span.inbox-one-claim-text', undefined, claim.text));
-				if (claim.receiptLink) {
-					const link = claimEl.appendChild($('a.inbox-one-claim-receipt', undefined, localize('inboxOne.receipt', 'receipt')));
-					this._register(addClick(link, () => this.openReceipt(claim.receiptLink!)));
-				}
-			}
-		}
-
-		if (pack?.gapLine) {
-			detail.appendChild($('.inbox-one-detail-gap', undefined, pack.gapLine));
-		}
+		meta.appendChild($('span', undefined, localize('inboxOne.updatedAgo', 'Updated {0}', formatElapsed(Date.now() - task.updatedAt))));
+		const openLink = meta.appendChild($('a.inbox-one-detail-open-session', undefined, localize('inboxOne.openFullSession', 'Open full session \u2192')));
+		this._register(addClick(openLink, () => this.openWorkerSession(task)));
 
 		if (task.state === LogicalTaskState.Decision) {
-			detail.appendChild(this.renderDetailActions(task));
+			this.renderDecisionPanel(detail, task);
 		} else if (task.state === LogicalTaskState.Completed) {
 			detail.appendChild($('.inbox-one-detail-done', undefined, localize('inboxOne.completedNote', 'Completed. History preserved.')));
 			const actions = detail.appendChild($('.inbox-one-detail-actions'));
 			const reopen = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.reopen', 'Reopen with Diffy')));
 			this._register(addClick(reopen, () => this.openInlineComposer(task, 'reopen')));
-			const open = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.openWork', 'Open')));
-			this._register(addClick(open, () => this.openWorkerSession(task)));
 			const archive = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.archiveBtn', 'Archive')));
 			this._register(addClick(archive, () => this.dismiss(task)));
 		} else if (task.state === LogicalTaskState.Archived) {
@@ -468,20 +442,127 @@ export class InboxOneView extends AbstractCustomView {
 			const actions = detail.appendChild($('.inbox-one-detail-actions'));
 			const restore = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${localize('inboxOne.restore', 'Restore')} \u25b8`));
 			this._register(addClick(restore, () => this.restore(task)));
-			const open = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.openWork', 'Open')));
-			this._register(addClick(open, () => this.openWorkerSession(task)));
 			const del = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.deleteBtn', 'Delete')));
 			this._register(addClick(del, () => this.deleteTask(task)));
 		} else if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
 			detail.appendChild($('.inbox-one-detail-done', undefined, localize('inboxOne.cookingNote', 'Diffy is working on this. Evidence will land here when ready.')));
 			const actions = detail.appendChild($('.inbox-one-detail-actions'));
-			const open = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.openWork', 'Open')));
-			this._register(addClick(open, () => this.openWorkerSession(task)));
 			const cancel = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.cancelWork', 'Cancel work')));
 			this._register(addClick(cancel, () => this.cancelWork(task)));
 		}
 
 		this.renderInlineComposer(detail, task);
+	}
+
+	/** The detail eyebrow: the item's attention state, plus a readiness phrase for decisions. */
+	private detailEyebrow(task: ILogicalTask): string {
+		switch (task.state) {
+			case LogicalTaskState.Decision: {
+				const readiness = task.evidence?.primaryAction
+					? localize('inboxOne.readyForApproval', 'Ready for approval')
+					: task.evidence?.customAsk
+						? localize('inboxOne.needsDecision', 'Needs your decision')
+						: localize('inboxOne.readyToReview', 'Ready to review');
+				return `${localize('inboxOne.needsAttention', 'Needs attention')} \u00b7 ${readiness}`;
+			}
+			case LogicalTaskState.Cooking:
+			case LogicalTaskState.Confirming:
+				return localize('inboxOne.inProgress', 'In progress');
+			case LogicalTaskState.Completed:
+				return localize('inboxOne.complete', 'Complete');
+			case LogicalTaskState.Archived:
+				return localize('inboxOne.archive', 'Archive');
+			default:
+				return '';
+		}
+	}
+
+	/**
+	 * The consolidated decision brief (refined UX D5/D6/D8/D9): a single panel that
+	 * states the proposed action, one short explanation, a neutral FYI for
+	 * non-blocking uncertainty, a collapsed Review (decisions + evidence), and the
+	 * decision controls next to the recommendation. Detailed consequences are shown
+	 * only in the post-approve modal (D10), never on this default screen.
+	 */
+	private renderDecisionPanel(detail: HTMLElement, task: ILogicalTask): void {
+		const pack = task.evidence;
+		const action = pack?.primaryAction;
+		const panel = detail.appendChild($('.inbox-one-decision-panel'));
+		const body = panel.appendChild($('.inbox-one-decision-body'));
+
+		// The proposed action, stated directly.
+		if (action) {
+			body.appendChild($('h3.inbox-one-decision-action', undefined, this.actionStatement(action)));
+		} else if (pack?.customAsk) {
+			body.appendChild($('h3.inbox-one-decision-action', undefined, localize('inboxOne.needsDecision', 'Needs your decision')));
+		}
+		// One short explanation of what the agent did and why.
+		if (pack?.decisionSentence) {
+			body.appendChild($('.inbox-one-decision-summary', undefined, pack.decisionSentence));
+		}
+		if (!action && pack?.customAsk) {
+			body.appendChild($('.inbox-one-decision-summary', undefined, pack.customAsk));
+		}
+		// Non-blocking uncertainty as a neutral FYI, not a warning.
+		if (pack?.gapLine) {
+			const fyi = body.appendChild($('.inbox-one-decision-fyi'));
+			fyi.appendChild($('span.inbox-one-decision-fyi-label', undefined, localize('inboxOne.fyiLabel', 'FYI:')));
+			fyi.appendChild($('span', undefined, ` ${pack.gapLine}`));
+		}
+		// Progressive disclosure: Review -> Decisions (conclusions) + Evidence (links).
+		if (pack && pack.claims.length) {
+			this.renderReview(body, pack.claims);
+		}
+
+		// Decision controls, next to the recommendation.
+		const footer = panel.appendChild($('.inbox-one-decision-footer'));
+		if (action) {
+			footer.appendChild($('span.inbox-one-decision-reversibility', undefined, buildConfirmation(action.actionType, action.payload as IActionPayloads[typeof action.actionType]).reversibilityLine));
+		}
+		footer.appendChild($('span.inbox-one-decision-spacer'));
+		const notNow = footer.appendChild($('button.inbox-one-action.inbox-one-action-quiet', undefined, localize('inboxOne.notNow', 'Not now')));
+		this._register(addClick(notNow, () => this.dismiss(task)));
+		const requestChanges = footer.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.requestChanges', 'Request changes')));
+		this._register(addClick(requestChanges, () => this.steer(task)));
+		if (action) {
+			const approve = footer.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, action.label));
+			this._register(addClick(approve, () => void this.confirmAndAccept(task)));
+		} else if (pack?.customAsk) {
+			const steerPrimary = footer.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.steer', 'Steer')));
+			this._register(addClick(steerPrimary, () => this.steer(task)));
+		}
+	}
+
+	/** A concrete, host-generated statement of the proposed action (first confirmation effect line). */
+	private actionStatement(action: IPrimaryAction): string {
+		const effect = buildConfirmation(action.actionType, action.payload as IActionPayloads[typeof action.actionType]).effectLines[0];
+		return effect ? effect.charAt(0).toUpperCase() + effect.slice(1) : action.label;
+	}
+
+	/** The collapsed Review section: decisions (claim conclusions) + evidence (receipt links). */
+	private renderReview(body: HTMLElement, claims: readonly IEvidenceClaim[]): void {
+		const disclosure = body.appendChild($('details.inbox-one-review')) as HTMLDetailsElement;
+		disclosure.appendChild($('summary.inbox-one-review-summary', undefined, localize('inboxOne.review', 'Review')));
+		const content = disclosure.appendChild($('.inbox-one-review-content'));
+
+		const decisions = content.appendChild($('.inbox-one-review-group'));
+		decisions.appendChild($('h4.inbox-one-review-group-title', undefined, localize('inboxOne.decisions', 'Decisions')));
+		const dlist = decisions.appendChild($('ul.inbox-one-review-list'));
+		for (const claim of claims) {
+			dlist.appendChild($('li', undefined, claim.text));
+		}
+
+		const withReceipts = claims.filter(c => c.receiptLink);
+		if (withReceipts.length) {
+			const evidence = content.appendChild($('.inbox-one-review-group'));
+			evidence.appendChild($('h4.inbox-one-review-group-title', undefined, localize('inboxOne.evidence', 'Evidence')));
+			const elist = evidence.appendChild($('ul.inbox-one-review-list'));
+			for (const claim of withReceipts) {
+				const li = elist.appendChild($('li'));
+				const link = li.appendChild($('a.inbox-one-claim-receipt', undefined, claim.text));
+				this._register(addClick(link, () => this.openReceipt(claim.receiptLink!)));
+			}
+		}
 	}
 
 	/**
@@ -610,67 +691,31 @@ export class InboxOneView extends AbstractCustomView {
 		await this.store.transition(task.id, TaskTrigger.Delete);
 	}
 
-	private renderDetailActions(task: ILogicalTask): HTMLElement {
-		const actions = $('.inbox-one-detail-actions');
-		// A custom ask ("other" action) has no typed action to accept; the human
-		// answers the worker's ask via Steer, so Steer is the primary affordance.
-		if (task.evidence?.customAsk) {
-			const steerPrimary = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${localize('inboxOne.steer', 'Steer')} \u25b8`));
-			this._register(addClick(steerPrimary, () => this.steer(task)));
-			const dismiss = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.dismiss', 'Dismiss')));
-			this._register(addClick(dismiss, () => this.dismiss(task)));
-			return actions;
-		}
-		const primaryLabel = task.evidence?.primaryAction?.label ?? localize('inboxOne.accept', 'Accept');
-		const accept = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${primaryLabel} \u25b8`));
-		this._register(addClick(accept, () => this.confirmAndAccept(task)));
-
-		const steer = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.steer', 'Steer')));
-		this._register(addClick(steer, () => this.steer(task)));
-
-		const dismiss = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.dismiss', 'Dismiss')));
-		this._register(addClick(dismiss, () => this.dismiss(task)));
-		return actions;
-	}
-
-	/** Renders the host-generated typed confirmation inline, then executes on confirm (design 7.3). */
-	private confirmAndAccept(task: ILogicalTask): void {
-		const detail = this.detailEl;
+	/** Host-generated typed confirmation, shown as a modal only after Approve is chosen (design 7.3, D10). */
+	private async confirmAndAccept(task: ILogicalTask): Promise<void> {
 		const action = task.evidence?.primaryAction;
-		if (!detail || !action) {
+		if (!action) {
 			void this.accept(task);
 			return;
 		}
-		this.confirmPanel?.remove();
 		const confirmation = buildConfirmation(action.actionType, action.payload as IActionPayloads[typeof action.actionType]);
-		const panel = detail.appendChild($('.inbox-one-confirm'));
-		this.confirmPanel = panel;
-		if (confirmation.highlight) {
-			panel.classList.add('irreversible');
-		}
-		panel.appendChild($('.inbox-one-confirm-title', undefined, localize('inboxOne.confirmTitle', 'Confirm - {0}', action.label)));
-		const effects = panel.appendChild($('.inbox-one-confirm-effects'));
-		effects.appendChild($('.inbox-one-confirm-effects-label', undefined, localize('inboxOne.thisWill', 'This will:')));
-		for (const line of confirmation.effectLines) {
-			effects.appendChild($('.inbox-one-confirm-effect', undefined, `\u2022 ${line}`));
-		}
-		panel.appendChild($('.inbox-one-confirm-reversibility', undefined, confirmation.reversibilityLine));
+		const detailLines = [
+			...confirmation.effectLines.map(line => `\u2022 ${line}`),
+			'',
+			confirmation.reversibilityLine,
+		];
 		if (task.evidence?.gapLine) {
-			panel.appendChild($('.inbox-one-confirm-gap', undefined, task.evidence.gapLine));
+			detailLines.push(`FYI: ${task.evidence.gapLine}`);
 		}
-		const buttons = panel.appendChild($('.inbox-one-confirm-buttons'));
-		const cancel = buttons.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.cancel', 'Cancel')));
-		this._register(addClick(cancel, () => panel.remove()));
-		const go = buttons.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, action.label));
-		this._register(addClick(go, () => { panel.remove(); void this.accept(task); }));
-	}
-
-	private acceptingLine(actionType: ActionType): string {
-		switch (actionType) {
-			case ActionType.ApprovePr: return localize('inboxOne.acceptingApprove', 'Accepting: approves the PR (you still control the merge).');
-			case ActionType.MergePr: return localize('inboxOne.acceptingMerge', 'Accepting: merges the PR and reruns checks.');
-			case ActionType.CreateIssues: return localize('inboxOne.acceptingIssues', 'Accepting: creates the grouped meta-issues.');
-			default: return localize('inboxOne.acceptingGeneric', 'Accepting runs the typed action.');
+		const { result } = await this.dialogService.prompt<boolean>({
+			type: confirmation.highlight ? Severity.Warning : Severity.Info,
+			message: localize('inboxOne.confirmTitle', 'Approve \u2014 {0}?', action.label),
+			detail: detailLines.join('\n'),
+			buttons: [{ label: action.label, run: () => true }],
+			cancelButton: true,
+		});
+		if (result) {
+			void this.accept(task);
 		}
 	}
 

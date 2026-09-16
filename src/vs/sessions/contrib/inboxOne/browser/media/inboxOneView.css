@@ -67,6 +67,7 @@
 .inbox-one-detail-title {
 	margin: 4px 0 2px 0;
 	font-size: 18px;
+	font-weight: 600;
 }
 
 .inbox-one-detail-summary {
@@ -82,50 +83,131 @@
 	margin-bottom: 10px;
 }
 
-.inbox-one-detail-accepting {
-	font-size: 13px;
-	margin-bottom: 12px;
-	padding: 6px 10px;
-	border-radius: 4px;
-	background: var(--vscode-textBlockQuote-background);
-}
-
-.inbox-one-detail-ask {
-	margin: 12px 0;
-	padding: 8px 12px;
-	border-left: 3px solid var(--vscode-chat-inputWorkingBorderColor1, var(--vscode-progressBar-background));
-	border-radius: 2px;
-	background: var(--vscode-textBlockQuote-background);
-}
-.inbox-one-detail-ask-label {
+/* Detail eyebrow: attention state + readiness. */
+.inbox-one-detail-eyebrow {
 	font-size: 11px;
 	font-weight: 600;
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
 	color: var(--vscode-descriptionForeground);
 	margin-bottom: 4px;
 }
-.inbox-one-detail-ask-body {
-	font-size: 13px;
-	color: var(--vscode-foreground);
-	white-space: pre-wrap;
-}
 
-.inbox-one-detail-claims-header {
-	font-weight: 600;
-	margin-bottom: 4px;
-}
-
-.inbox-one-claim {
+/* Detail meta: repo, last-updated, and a persistent Open full session link. */
+.inbox-one-detail-meta {
 	display: flex;
 	gap: 6px;
-	align-items: baseline;
-	padding: 3px 0;
+	align-items: center;
+	margin: 4px 0 16px 0;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-detail-dot-sep {
+	opacity: 0.6;
+}
+
+.inbox-one-detail-open-session {
+	margin-left: auto;
+	color: var(--vscode-textLink-foreground);
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.inbox-one-detail-open-session:hover {
+	text-decoration: underline;
+}
+
+/* Consolidated decision brief. */
+.inbox-one-decision-panel {
+	margin-top: 4px;
+	border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
+	border-radius: 8px;
+	overflow: hidden;
+	background: var(--vscode-editor-background);
+}
+
+.inbox-one-decision-body {
+	padding: 16px 18px 14px;
+}
+
+.inbox-one-decision-action {
+	margin: 0;
+	font-size: 15px;
+	font-weight: 600;
+}
+
+.inbox-one-decision-summary {
+	margin: 7px 0 0;
+	font-size: 13px;
+	line-height: 1.45;
+	color: var(--vscode-foreground);
+}
+
+/* Non-blocking uncertainty as a neutral FYI, not a warning. */
+.inbox-one-decision-fyi {
+	margin-top: 12px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-decision-fyi-label {
+	font-weight: 600;
+}
+
+/* Progressive-disclosure Review section. */
+.inbox-one-review {
+	margin-top: 14px;
+	border-top: 1px solid var(--vscode-panel-border, transparent);
+}
+
+.inbox-one-review-summary {
+	padding: 10px 0 0;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.inbox-one-review-summary:hover {
+	text-decoration: underline;
+}
+
+.inbox-one-review-group {
+	margin-top: 10px;
+}
+
+.inbox-one-review-group-title {
+	margin: 0 0 4px;
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-review-list {
+	margin: 0;
+	padding-left: 18px;
 	font-size: 13px;
 }
 
-.inbox-one-claim-bullet {
+.inbox-one-review-list li {
+	margin: 3px 0;
+}
+
+/* Decision controls, next to the recommendation. */
+.inbox-one-decision-footer {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	padding: 10px 14px;
+	border-top: 1px solid var(--vscode-panel-border, transparent);
+	background: var(--vscode-editorWidget-background);
+}
+
+.inbox-one-decision-reversibility {
+	font-size: 12px;
 	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-decision-spacer {
+	flex: 1;
 }
 
 .inbox-one-claim-receipt {
@@ -136,13 +218,6 @@
 
 .inbox-one-claim-receipt:hover {
 	text-decoration: underline;
-}
-
-.inbox-one-detail-gap {
-	margin: 10px 0;
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
-	font-style: italic;
 }
 
 /* Blocked recovery layout (wireframes 7). */
@@ -177,57 +252,6 @@
 .inbox-one-detail-done {
 	margin-top: 16px;
 	color: var(--vscode-descriptionForeground);
-}
-
-.inbox-one-confirm {
-	margin-top: 16px;
-	padding: 12px 14px;
-	border-radius: 6px;
-	border: 1px solid var(--vscode-panel-border, transparent);
-	background: var(--vscode-editorWidget-background);
-}
-
-.inbox-one-confirm.irreversible {
-	border-color: var(--vscode-editorWarning-foreground, #cca700);
-}
-
-.inbox-one-confirm-title {
-	font-weight: 600;
-	margin-bottom: 8px;
-}
-
-.inbox-one-confirm-effects-label {
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
-}
-
-.inbox-one-confirm-effect {
-	font-size: 13px;
-	padding: 2px 0 2px 8px;
-}
-
-.inbox-one-confirm-reversibility {
-	margin-top: 8px;
-	font-size: 12px;
-}
-
-.inbox-one-confirm.irreversible .inbox-one-confirm-reversibility {
-	color: var(--vscode-editorWarning-foreground, #cca700);
-	font-weight: 600;
-}
-
-.inbox-one-confirm-gap {
-	margin-top: 6px;
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
-	font-style: italic;
-}
-
-.inbox-one-confirm-buttons {
-	display: flex;
-	gap: 8px;
-	margin-top: 12px;
-	justify-content: flex-end;
 }
 
 .inbox-one-item.selected {
@@ -476,6 +500,17 @@
 
 .inbox-one-action-primary:hover {
 	background: var(--vscode-button-hoverBackground);
+}
+
+.inbox-one-action-quiet {
+	background: transparent;
+	border-color: transparent;
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-action-quiet:hover {
+	background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+	color: var(--vscode-foreground);
 }
 
 .inbox-one-empty {
