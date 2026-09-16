@@ -389,6 +389,28 @@ export class InboxOneView extends AbstractCustomView {
 			stateLine.appendChild($('span.inbox-one-item-consequence', undefined, consequence));
 		}
 
+		// Inline quick actions for an approval-ready item: Skip (delegate to the
+		// agent), Approve (the same confirmation modal as the detail), and Dismiss.
+		if (task.state === LogicalTaskState.Decision && task.evidence?.primaryAction) {
+			row.classList.add('has-quick-actions');
+			const quick = row.appendChild($('.inbox-one-quick-actions'));
+			const skip = quick.appendChild($('button.inbox-one-quick-action'));
+			skip.title = localize('inboxOne.skipTitle', 'Skip \u2014 let the agent decide');
+			skip.setAttribute('aria-label', skip.title);
+			skip.appendChild($('span.codicon.codicon-debug-step-over'));
+			this._register(addClick(skip, () => void this.skipToAgent(task)));
+			const approve = quick.appendChild($('button.inbox-one-quick-action'));
+			approve.title = localize('inboxOne.approveTitle', 'Approve');
+			approve.setAttribute('aria-label', approve.title);
+			approve.appendChild($('span.codicon.codicon-check'));
+			this._register(addClick(approve, () => void this.confirmAndAccept(task)));
+			const dismissBtn = quick.appendChild($('button.inbox-one-quick-action'));
+			dismissBtn.title = localize('inboxOne.dismissTitle', 'Dismiss');
+			dismissBtn.setAttribute('aria-label', dismissBtn.title);
+			dismissBtn.appendChild($('span.codicon.codicon-close'));
+			this._register(addClick(dismissBtn, () => this.dismiss(task)));
+		}
+
 		this._register(addClick(row, () => this.selectedTaskId.set(task.id, undefined)));
 		if (this.pendingScrollTaskId === task.id) {
 			this.pendingScrollTaskId = undefined;
@@ -733,6 +755,11 @@ export class InboxOneView extends AbstractCustomView {
 
 	private async dismiss(task: ILogicalTask): Promise<void> {
 		await this.store.transition(task.id, TaskTrigger.Dismiss, { archiveReason: 'dismissed from inbox' });
+	}
+
+	/** Row "Skip": hand the decision back to the agent to proceed as it judges best (reuses steer). */
+	private async skipToAgent(task: ILogicalTask): Promise<void> {
+		await this.continueTask(task, 'steer', localize('inboxOne.skipNote', 'You decide how best to proceed \u2014 take the action you judge is right, or tell me what you need.'));
 	}
 
 	private openReceipt(link: string): void {
