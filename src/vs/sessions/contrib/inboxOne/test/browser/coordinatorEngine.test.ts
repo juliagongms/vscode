@@ -289,7 +289,7 @@ suite('Inbox One - coordinator engine', () => {
 		assert.strictEqual(reader.reads.length, 1, 'the worker result was read once');
 	});
 
-	test('an invalid worker result, after a finalize retry, fails the attempt instead of fabricating a decision', async () => {
+	test('an invalid worker result, after a finalize retry, lands a coherent needs-direction decision', async () => {
 		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
 		const reader = new FakeResultReader();
 		reader.output = { result: { decisionSentence: '', claims: [], gapLine: '' }, signals: {} }; // missing mandatory evidence
@@ -302,13 +302,16 @@ suite('Inbox One - coordinator engine', () => {
 		// First idle turn: the invalid result triggers one finalize retry (stay Cooking).
 		await engine.handleEvent(finished);
 		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Cooking);
-		// Still invalid after the retry: fail the attempt.
+		// Still invalid after the retry: land a coherent, steerable item asking for direction.
 		await engine.handleEvent({ ...finished, deliveryId: 'sf2b' });
 
 		const landed = store.getTask(task.id)!;
-		// A failed attempt surfaces as a Decision + Retry, never a fabricated success.
+		// A failed attempt surfaces as a COHERENT Decision the human can steer -- never a
+		// fabricated success, and never an empty, un-steerable Decision.
 		assert.strictEqual(landed.state, LogicalTaskState.Decision);
-		assert.strictEqual(landed.evidence, undefined, 'no evidence was fabricated');
+		assert.ok(landed.evidence, 'lands a coherent needs-direction item');
+		assert.ok(landed.evidence!.customAsk, 'surfaces a customAsk so Steer is the primary affordance');
+		assert.strictEqual(landed.evidence!.claims.length, 0, 'no domain claims are fabricated');
 	});
 
 	test('a finished conversation thread is NOT turned into a fabricated failed decision', async () => {

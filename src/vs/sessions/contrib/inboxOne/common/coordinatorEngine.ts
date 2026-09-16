@@ -11,7 +11,7 @@ import { triggerFamilyFor, WorkerRole } from './eventTaxonomy.js';
 import { deriveGroupKey } from './groupKey.js';
 import { currentAttempt, IInboxOneStore } from './inboxOneStore.js';
 import { AutonomyLevel, IInboxOneSettings } from './inboxOneSettings.js';
-import { AttemptTrigger, EventSource, GroupKey, IIngressEvent, ILogicalTask, LogicalTaskState } from './inboxOneTypes.js';
+import { AttemptTrigger, EventSource, GroupKey, IIngressEvent, ILogicalTask, InboxOneTier, LogicalTaskState } from './inboxOneTypes.js';
 import { TaskTrigger } from './inboxOneStateMachine.js';
 import { rank } from './ranking.js';
 import { IWorkerDispatcher } from './workerDispatcher.js';
@@ -158,9 +158,9 @@ export class CoordinatorEngine {
 					this.logService.trace(`[inboxOne] conversation ${event.sessionId} finished`);
 				} else if (!await this.tryLandWorkerResult(task) && !await this.tryRequestFinalize(task)) {
 					// The worker went idle (turn/task complete) but emitted no parseable
-					// result: ask it once to finalize what it found into the emit-result
-					// block, and only fail the attempt if it still produces nothing.
-					await this.store.transition(task.id, TaskTrigger.AttemptFailed);
+					// result, even after a finalize nudge: land a coherent, steerable
+					// item asking for direction rather than an empty Decision.
+					await this.landUnfinished(task);
 				}
 				break;
 			case 'needs_input':
@@ -172,7 +172,7 @@ export class CoordinatorEngine {
 				}
 				break;
 			case 'failed':
-				await this.store.transition(task.id, TaskTrigger.AttemptFailed);
+				await this.landUnfinished(task);
 				break;
 			case 'progress':
 			case 'idle':
@@ -227,6 +227,35 @@ export class CoordinatorEngine {
 		});
 		this.logService.info(`[inboxOne] task ${task.id} landed as ${ranked.tier}: ${ranked.reason}`);
 		return true;
+	}
+
+	/**
+	 * Lands a failed/unfinished attempt as a COHERENT, steerable Decision instead of
+	 * an empty one. A worker that ends without a parseable emit-result (even after a
+	 * finalize nudge) would otherwise transition to Decision with no evidence pack --
+	 * a broken item with a fallback title, no evidence, and no action, that also
+	 * cannot be steered cleanly. Here the host authors a minimal evidence pack whose
+	 * customAsk turns Steer into the primary affordance, so the human can redirect it
+	 * (e.g. "implement a fix") or dismiss it. Authors no domain claim -- only the
+	 * framework acknowledgement that the worker needs direction.
+	 */
+	private async landUnfinished(task: ILogicalTask): Promise<void> {
+		const subject = task.sourceEvent.subject;
+		const ref = `${subject.kind} #${subject.id}`;
+		await this.store.setEvidence(task.id, {
+			title: `Needs your direction: ${ref}`,
+			decisionSentence: `Diffy's ${task.type} worker finished without a usable result for ${ref} and needs your direction to continue.`,
+			customAsk: `I could not complete this on my own. Steer me with what you'd like done - for example, implement a fix, or how to triage it - or dismiss it.`,
+			claims: [],
+			gapLine: '',
+			freshness: { computedAt: Date.now() },
+		});
+		await this.store.transition(task.id, TaskTrigger.AttemptFailed, {
+			tier: InboxOneTier.Urgent,
+			rank: 0,
+			rankReason: 'The worker could not finish and needs your direction.',
+		});
+		this.logService.info(`[inboxOne] task ${task.id} landed as unfinished (needs direction)`);
 	}
 
 	/**
