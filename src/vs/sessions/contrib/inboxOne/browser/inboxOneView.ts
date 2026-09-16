@@ -35,15 +35,23 @@ const DIFFY_SELECTION = '__diffy__';
 /** Storage key for the persisted set of collapsed section keys. */
 const COLLAPSED_SECTIONS_KEY = 'inboxOne.collapsedSections';
 
-/** The inbox sections in display order (design 3.1). */
+/** The inbox sections in display order. Attention states (design 3.1, refined UX). */
 const SECTIONS: readonly ITierSpec[] = [
-	{ key: 'critical', label: localize('inboxOne.critical', 'CRITICAL'), match: t => t.state === LogicalTaskState.Decision && t.tier === InboxOneTier.Critical },
-	{ key: 'urgent', label: localize('inboxOne.urgent', 'URGENT'), match: t => (t.state === LogicalTaskState.Decision && t.tier === InboxOneTier.Urgent) || t.state === LogicalTaskState.Blocked },
-	{ key: 'fyi', label: localize('inboxOne.fyi', 'FYI'), match: t => t.state === LogicalTaskState.Decision && (t.tier === InboxOneTier.Fyi || t.tier === undefined) },
-	{ key: 'cooking', label: localize('inboxOne.cooking', 'COOKING'), match: t => t.state === LogicalTaskState.Cooking || t.state === LogicalTaskState.Confirming },
-	{ key: 'completed', label: localize('inboxOne.completed', 'COMPLETED'), match: t => t.state === LogicalTaskState.Completed },
-	{ key: 'archive', label: localize('inboxOne.archive', 'ARCHIVE'), match: t => t.state === LogicalTaskState.Archived },
+	{ key: 'attention', label: localize('inboxOne.needsAttention', 'Needs attention'), match: t => t.state === LogicalTaskState.Decision || t.state === LogicalTaskState.Blocked },
+	{ key: 'in-progress', label: localize('inboxOne.inProgress', 'In progress'), match: t => t.state === LogicalTaskState.Cooking || t.state === LogicalTaskState.Confirming },
+	{ key: 'complete', label: localize('inboxOne.complete', 'Complete'), match: t => t.state === LogicalTaskState.Completed },
+	{ key: 'archive', label: localize('inboxOne.archive', 'Archive'), match: t => t.state === LogicalTaskState.Archived },
 ];
+
+/** Priority of a task within the merged "Needs attention" group (lower sorts first). */
+function attentionPriority(task: ILogicalTask): number {
+	if (task.state === LogicalTaskState.Blocked) { return 0; }
+	switch (task.tier) {
+		case InboxOneTier.Critical: return 1;
+		case InboxOneTier.Urgent: return 2;
+		default: return 3;
+	}
+}
 
 /**
  * The tiered decisions inbox (design 3.1, wireframes 2). Two panes: the tiered
@@ -70,6 +78,8 @@ export class InboxOneView extends AbstractCustomView {
 	private readonly collapsedSections = new Set<string>();
 	/** The repo scope filter (wireframes 2 "my" selector); undefined = all repos. */
 	private readonly scopeRepo: ISettableObservable<string | undefined> = observableValue('inboxOneScope', undefined);
+	/** Free-text filter over the list (refined UX: filter tasks for larger inboxes). */
+	private readonly searchQuery: ISettableObservable<string> = observableValue('inboxOneSearch', '');
 
 	constructor(
 		@IInboxOneStore private readonly store: IInboxOneStore,
@@ -131,6 +141,12 @@ export class InboxOneView extends AbstractCustomView {
 			diffy.classList.toggle('selected', this.selectedTaskId.read(reader) === DIFFY_SELECTION);
 		}));
 		const scopeEl = left.appendChild($('.inbox-one-scope'));
+		const searchWrap = left.appendChild($('.inbox-one-search'));
+		const searchInput = searchWrap.appendChild($('input.inbox-one-search-input')) as HTMLInputElement;
+		searchInput.type = 'search';
+		searchInput.placeholder = localize('inboxOne.filterTasks', 'Filter tasks');
+		searchInput.setAttribute('aria-label', localize('inboxOne.filterTasks', 'Filter tasks'));
+		this._register(addDisposableListener(searchInput, 'input', () => this.searchQuery.set(searchInput.value, undefined)));
 		this.listEl = left.appendChild($('.inbox-one-list'));
 
 		this.detailEl = panes.appendChild($('.inbox-one-detail'));
@@ -139,10 +155,12 @@ export class InboxOneView extends AbstractCustomView {
 			const tasks = this.store.tasks.read(reader);
 			const selected = this.selectedTaskId.read(reader);
 			const scope = this.scopeRepo.read(reader);
+			const query = this.searchQuery.read(reader).trim().toLowerCase();
 			this.inlineCompose.read(reader);
 			this.renderScope(scopeEl, tasks, scope);
 			const scoped = scope ? tasks.filter(t => t.repo === scope) : tasks;
-			this.renderList(scoped, selected);
+			const filtered = query ? scoped.filter(t => this.matchesQuery(t, query)) : scoped;
+			this.renderList(filtered, selected);
 			if (selected === DIFFY_SELECTION) {
 				this.renderDiffyDetail(tasks);
 			} else {
@@ -305,6 +323,12 @@ export class InboxOneView extends AbstractCustomView {
 			const items = tasks.filter(section.match);
 			if (items.length === 0) {
 				continue;
+			}
+			// The "Needs attention" group merges the decision tiers, so sort it by
+			// priority (blocked, then critical/urgent/fyi), then rank, so the most
+			// pressing item still leads.
+			if (section.key === 'attention') {
+				items.sort((a, b) => attentionPriority(a) - attentionPriority(b) || (b.rank ?? 0) - (a.rank ?? 0));
 			}
 			const collapsed = this.collapsedSections.has(section.key);
 			const header = list.appendChild($('button.inbox-one-section-header'));
@@ -708,6 +732,18 @@ export class InboxOneView extends AbstractCustomView {
 	 */
 	private listTitle(task: ILogicalTask): string {
 		return task.evidence?.title?.trim() || this.fallbackTitle(task);
+	}
+
+	/** Whether a task matches the free-text list filter (title, repo, and current state). */
+	private matchesQuery(task: ILogicalTask, query: string): boolean {
+		const haystack = [
+			this.listTitle(task),
+			task.repo ?? '',
+			task.type,
+			task.rankReason ?? '',
+			this.stateLabel(task.state),
+		].join(' ').toLowerCase();
+		return haystack.includes(query);
 	}
 
 	private stateLabel(state: LogicalTaskState): string {
