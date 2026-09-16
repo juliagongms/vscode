@@ -26,6 +26,27 @@ export const MAX_LABEL_WORDS = 4;
 export const MIN_EVIDENCE_CLAIMS = 1;
 export const MAX_EVIDENCE_CLAIMS = 4;
 
+/**
+ * Caps an over-long claim list to {@link MAX_EVIDENCE_CLAIMS}, keeping the
+ * STRONGEST claims by rung and preserving their original relative order. Used so
+ * a worker that over-delivers (5+ grounded claims) has its pack trimmed rather
+ * than rejected -- the same "clean, don't fail" philosophy as {@link cleanLabel}
+ * for over-long labels. Zero claims is still a genuine content failure and is
+ * rejected upstream, not capped here.
+ */
+function capClaims(claims: readonly IEvidenceClaim[], max: number): IEvidenceClaim[] {
+	if (claims.length <= max) {
+		return claims.slice();
+	}
+	const keep = new Set(
+		claims.map((c, i) => ({ c, i }))
+			.sort((a, b) => (b.c.rung - a.c.rung) || (a.i - b.i))
+			.slice(0, max)
+			.map(x => x.i),
+	);
+	return claims.filter((_, i) => keep.has(i));
+}
+
 /** The raw, untrusted result a worker emits (as parsed from its structured output). */
 export interface IRawWorkerResult {
 	readonly actionType?: string;
@@ -84,8 +105,8 @@ export function validateWorkerResult(raw: IRawWorkerResult): IEmitResultOutcome 
 		problems.push('gapLine (the mandatory "Not verified" line) must be a non-empty string');
 	}
 	const rawClaims = Array.isArray(raw.claims) ? raw.claims : [];
-	if (rawClaims.length < MIN_EVIDENCE_CLAIMS || rawClaims.length > MAX_EVIDENCE_CLAIMS) {
-		problems.push(`evidence must have between ${MIN_EVIDENCE_CLAIMS} and ${MAX_EVIDENCE_CLAIMS} claims`);
+	if (rawClaims.length < MIN_EVIDENCE_CLAIMS) {
+		problems.push(`evidence must have at least ${MIN_EVIDENCE_CLAIMS} claim`);
 	}
 	const claims: IEvidenceClaim[] = [];
 	rawClaims.forEach((c, i) => {
@@ -132,7 +153,7 @@ export function validateWorkerResult(raw: IRawWorkerResult): IEmitResultOutcome 
 		title: shortTitle(raw.title),
 		decisionSentence: raw.decisionSentence!.trim(),
 		customAsk,
-		claims,
+		claims: capClaims(claims, MAX_EVIDENCE_CLAIMS),
 		gapLine: raw.gapLine!.trim(),
 		freshness: raw.freshness ?? { computedAt: Date.now() },
 		primaryAction,

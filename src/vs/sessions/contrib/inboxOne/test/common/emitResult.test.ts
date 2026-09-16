@@ -101,10 +101,26 @@ suite('Inbox One - emit-result validation', () => {
 		}
 	});
 
-	test('rejects zero claims and too many claims', () => {
+	test('rejects zero claims but caps (not rejects) an over-long claim list to the strongest', () => {
 		assert.strictEqual(validateWorkerResult(baseEvidence({ claims: [] })).ok, false);
-		const tooMany = Array.from({ length: 5 }, (_, i) => ({ text: `c${i}`, rung: EvidenceRung.Illustrative }));
-		assert.strictEqual(validateWorkerResult(baseEvidence({ claims: tooMany })).ok, false);
+		// A worker that over-delivers with 5 grounded claims should not have its whole
+		// result thrown away; the pack is trimmed to the strongest MAX by rung,
+		// preserving their original order (same "clean, don't fail" rule as labels).
+		const tooMany = [
+			{ text: 'c0', rung: EvidenceRung.Illustrative },
+			{ text: 'c1', rung: EvidenceRung.SourceLineage },
+			{ text: 'c2', rung: EvidenceRung.Illustrative },
+			{ text: 'c3', rung: EvidenceRung.ReproducibleTest },
+			{ text: 'c4', rung: EvidenceRung.SingleRun },
+		];
+		const result = validateWorkerResult(baseEvidence({ claims: tooMany }));
+		assert.strictEqual(result.ok, true);
+		if (result.ok) {
+			assert.strictEqual(result.evidence.claims.length, 4);
+			const kept = result.evidence.claims.map(c => c.text);
+			// The weakest of the two Illustrative claims (c2, later in order) is dropped.
+			assert.deepStrictEqual(kept, ['c0', 'c1', 'c3', 'c4'], 'keeps the strongest by rung, in original order');
+		}
 	});
 
 	test('rejects a claim without text', () => {
