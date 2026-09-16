@@ -1075,6 +1075,31 @@ suite('ChatSessionsService - lightweight history reads', () => {
 		);
 	});
 
+	test('includes the in-flight streamed turn for an unretained live session', async () => {
+		const type = 'history-live-fetch';
+		const resource = URI.from({ scheme: type, path: '/session-1' });
+		const part: IChatProgress = { kind: 'markdownContent', content: new MarkdownString('the streaming worker result') };
+		let disposed = 0;
+		store.add(service.registerChatSessionContribution({ type, name: type, displayName: type, description: '' }));
+		store.add(service.registerChatSessionContentProvider(type, {
+			// A turn that is still streaming is not in `history` yet; the provider
+			// hands it back through `progressObs`.
+			provideChatSessionContent: async sessionResource => ({
+				sessionResource,
+				history: [],
+				progressObs: observableValue<IChatProgress[]>('progress', [part]),
+				onWillDispose: Event.None,
+				dispose: () => disposed++,
+			}),
+		}));
+
+		assert.deepStrictEqual(
+			await service.getChatSessionHistory(resource, CancellationToken.None),
+			[{ type: 'response', parts: [part], participant: type }],
+		);
+		assert.strictEqual(disposed, 1, 'still disposes the transient session');
+	});
+
 	test('reads an aliased retained session without resolving it again', async () => {
 		const type = 'history-cached-alias';
 		const resource = URI.from({ scheme: type, path: '/session-1' });

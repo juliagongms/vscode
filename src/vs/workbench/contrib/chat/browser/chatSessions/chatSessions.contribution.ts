@@ -307,6 +307,31 @@ class ContributedChatSessionData extends Disposable {
 	}
 }
 
+/**
+ * A session's history including its in-flight turn. `history` is only the
+ * snapshot of completed turns: while a turn is streaming it arrives through
+ * `progressObs` and is folded into `history` by the provider only once it
+ * finishes. A live session (e.g. a background agent-host session started in
+ * this window) would otherwise read back as empty for the whole run. The
+ * runtime clears the streamed parts at the start of each request, so they only
+ * ever carry the current turn.
+ */
+function historyWithLiveTurn(session: IChatSession, chatSessionType: string): IChatSessionHistoryItem[] {
+	const history = [...session.history];
+	const live = session.progressObs?.get();
+	if (live?.length) {
+		// Attribute the streamed turn to the same participant as the session's most
+		// recent response so consumers can't tell it apart from a completed turn.
+		const lastResponse = history.filter(item => item.type === 'response').at(-1);
+		history.push({
+			type: 'response',
+			parts: [...live],
+			participant: lastResponse?.type === 'response' ? lastResponse.participant : chatSessionType,
+		});
+	}
+	return history;
+}
+
 interface IPendingSessionResolution {
 	readonly promise: Promise<IChatSession>;
 	readonly cancellationTokenSource: CancellationTokenSource;
@@ -1419,25 +1444,7 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 	public async getChatSessionHistory(sessionResource: URI, token: CancellationToken): Promise<readonly IChatSessionHistoryItem[]> {
 		const existing = this._sessions.get(this._resolveResource(sessionResource));
 		if (existing) {
-			const history = [...existing.session.history];
-			// `history` is the snapshot taken when the session was resolved. While a
-			// session stays retained, the in-flight turn streams through `progressObs`
-			// and is only folded into `history` by a later provider fetch, so a live
-			// session (e.g. a background agent-host session started in this window)
-			// would otherwise read back as empty. Surface the streamed turn too.
-			const live = existing.session.progressObs?.get();
-			if (live?.length) {
-				// Attribute the streamed turn to the same participant as the session's
-				// most recent response so consumers can't tell it apart from a turn
-				// that a later provider fetch would have folded into `history`.
-				const lastResponse = history.filter(item => item.type === 'response').at(-1);
-				history.push({
-					type: 'response',
-					parts: [...live],
-					participant: lastResponse?.type === 'response' ? lastResponse.participant : existing.chatSessionType,
-				});
-			}
-			return history;
+			return historyWithLiveTurn(existing.session, existing.chatSessionType);
 		}
 
 		if (isUntitledChatSession(sessionResource)) {
@@ -1456,7 +1463,7 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 
 		const session = await raceCancellationError(provider.provideChatSessionContent(sessionResource, token), token);
 		try {
-			return [...session.history];
+			return historyWithLiveTurn(session, resolvedType);
 		} finally {
 			session.dispose();
 		}
