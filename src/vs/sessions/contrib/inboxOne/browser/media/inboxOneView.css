@@ -168,21 +168,6 @@
 	font-weight: 600;
 }
 
-.inbox-one-item-blocked-badge {
-	display: inline-block;
-	margin-right: 6px;
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.05em;
-	color: var(--vscode-editorWarning-foreground, #cca700);
-}
-
-.inbox-one-item.blocked .inbox-one-item-title {
-	display: flex;
-	align-items: baseline;
-	gap: 2px;
-}
-
 .inbox-one-detail-actions {
 	display: flex;
 	gap: 8px;
@@ -384,81 +369,13 @@
 	opacity: 0.7;
 }
 
-/* Cooking: three-stage progress (wireframes 6). The accent reuses the chat input's "working" border token so an in-progress inbox item reads as the same blue as an in-progress session composer (one cohesive in-progress colorway). */
-.inbox-one-cooking {
-	margin: 6px 0 14px 0;
-}
-.inbox-one-cooking.compact {
-	margin: 4px 0 0 0;
-	font-size: 11px;
-}
-
-.inbox-one-cooking.compact .inbox-one-cooking-stage {
-	font-size: 11px;
-	gap: 4px;
-}
-
-.inbox-one-cooking.compact .inbox-one-cooking-rail {
-	flex-basis: 10px;
-	min-width: 8px;
-}
-
-.inbox-one-cooking-stages {
-	display: flex;
-	align-items: center;
-	gap: 4px;
-	flex-wrap: wrap;
-}
-
-.inbox-one-cooking-stage {
-	display: inline-flex;
-	align-items: center;
-	gap: 5px;
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
-	white-space: nowrap;
-}
-
-.inbox-one-cooking-stage.done { color: var(--vscode-foreground); }
-.inbox-one-cooking-stage.active {
-	color: var(--vscode-foreground);
-	font-weight: 600;
-}
-.inbox-one-cooking-stage.active .inbox-one-cooking-dot {
-	color: var(--vscode-chat-inputWorkingBorderColor1, var(--vscode-progressBar-background));
-	animation: inbox-one-pulse 1.4s ease-in-out infinite;
-}
-.inbox-one-cooking-stage.done .inbox-one-cooking-dot { color: var(--vscode-chat-inputWorkingBorderColor1, var(--vscode-progressBar-background)); }
-.inbox-one-cooking-dot { font-size: 10px; }
-
-.inbox-one-cooking-rail {
-	flex: 1 1 18px;
-	min-width: 14px;
-	height: 2px;
-	border-radius: 1px;
-	background: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
-}
-.inbox-one-cooking-rail.filled {
-	background: var(--vscode-chat-inputWorkingBorderColor1, var(--vscode-progressBar-background));
-}
-
-.inbox-one-cooking-meta {
-	margin-top: 6px;
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
-}
-
-@keyframes inbox-one-pulse {
-	0%, 100% { opacity: 1; }
-	50% { opacity: 0.35; }
-}
-
 .inbox-one-item {
+	position: relative;
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
+	gap: 3px;
 	padding: 10px 16px;
-	margin: 2px 8px;
+	margin: 1px 8px;
 	border-radius: 6px;
 	border: 1px solid transparent;
 	cursor: default;
@@ -468,30 +385,74 @@
 	background: var(--vscode-list-hoverBackground);
 }
 
-.inbox-one-item-critical {
-	border-left: 3px solid var(--vscode-editorError-foreground, #f14c4c);
-}
-
-.inbox-one-item-urgent {
-	border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
-}
-
 .inbox-one-item-title {
-	font-weight: 600;
+	font-weight: 500;
 	line-height: 1.3;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
+/* Context line: repo and recency. */
+.inbox-one-item-context {
+	display: flex;
+	gap: 5px;
+	align-items: center;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-item-dot-sep {
+	opacity: 0.6;
+}
+
+/* State line: a single dot + the current state, plus the action consequence. */
+.inbox-one-item-state {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	margin-top: 3px;
+	font-size: 12px;
+}
+
+.inbox-one-state-dot {
+	flex: 0 0 auto;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--vscode-descriptionForeground);
+}
+
+/* Needs-attention rows read as amber; critical reads as red; complete as blue. */
+.inbox-one-item-attention .inbox-one-state-dot {
+	background: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.inbox-one-item-critical .inbox-one-state-dot {
+	background: var(--vscode-editorError-foreground, #f14c4c);
+}
+
+.inbox-one-item-complete .inbox-one-state-dot {
+	background: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
+}
+
+.inbox-one-item-consequence {
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+}
+
+.inbox-one-item-consequence::before {
+	content: '\00b7';
+	margin-right: 6px;
+	opacity: 0.6;
+}
+
+/* Shared meta line (also used by the skills view). */
 .inbox-one-item-meta {
 	display: flex;
 	gap: 10px;
 	font-size: 12px;
 	color: var(--vscode-descriptionForeground);
-}
-
-.inbox-one-item-actions {
-	display: flex;
-	gap: 8px;
-	margin-top: 6px;
 }
 
 .inbox-one-action {
@@ -515,12 +476,6 @@
 
 .inbox-one-action-primary:hover {
 	background: var(--vscode-button-hoverBackground);
-}
-
-.inbox-one-item-stage {
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
-	font-style: italic;
 }
 
 .inbox-one-empty {

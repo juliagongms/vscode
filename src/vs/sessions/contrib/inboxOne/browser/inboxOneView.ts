@@ -357,6 +357,9 @@ export class InboxOneView extends AbstractCustomView {
 	private renderListItem(task: ILogicalTask, sectionKey: string, selected: boolean): HTMLElement {
 		const row = $('.inbox-one-item');
 		row.classList.add(`inbox-one-item-${sectionKey}`);
+		if (task.state === LogicalTaskState.Decision && task.tier === InboxOneTier.Critical) {
+			row.classList.add('inbox-one-item-critical');
+		}
 		if (selected) {
 			row.classList.add('selected');
 		}
@@ -365,18 +368,27 @@ export class InboxOneView extends AbstractCustomView {
 			row.classList.add('blocked');
 		}
 		const title = row.appendChild($('.inbox-one-item-title'));
-		if (blocked) {
-			title.appendChild($('span.inbox-one-item-blocked-badge', undefined, localize('inboxOne.blockedBadge', '! BLOCKED')));
-		}
 		title.appendChild($('span', undefined, this.listTitle(task)));
-		const meta = row.appendChild($('.inbox-one-item-meta'));
+
+		// Context line: repo and recency, so an interrupted task is easy to place.
+		const context = row.appendChild($('.inbox-one-item-context'));
 		if (task.repo) {
-			meta.appendChild($('span.inbox-one-item-repo', undefined, task.repo));
+			context.appendChild($('span.inbox-one-item-repo', undefined, task.repo));
+			context.appendChild($('span.inbox-one-item-dot-sep', undefined, '\u00b7'));
 		}
-		meta.appendChild($('span.inbox-one-item-reason', undefined, task.rankReason ?? this.stateLabel(task.state)));
-		if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
-			row.appendChild(this.renderCookingStages(task, true));
+		context.appendChild($('span.inbox-one-item-recency', undefined, formatElapsed(Date.now() - task.updatedAt)));
+
+		// State line: one dot + the current state, plus the action consequence for
+		// items that need attention (what approval would do), replacing the multi-step
+		// progress bar and the "blocks N people" rank reason.
+		const stateLine = row.appendChild($('.inbox-one-item-state'));
+		stateLine.appendChild($('span.inbox-one-state-dot'));
+		stateLine.appendChild($('span.inbox-one-item-statelabel', undefined, this.rowStateLabel(task)));
+		const consequence = this.attentionConsequence(task);
+		if (consequence) {
+			stateLine.appendChild($('span.inbox-one-item-consequence', undefined, consequence));
 		}
+
 		this._register(addClick(row, () => this.selectedTaskId.set(task.id, undefined)));
 		if (this.pendingScrollTaskId === task.id) {
 			this.pendingScrollTaskId = undefined;
@@ -542,40 +554,6 @@ export class InboxOneView extends AbstractCustomView {
 		if (res.task) {
 			this.notificationService.info(localize('inboxOne.unblocked', "Thanks - I'll retry now with that unblocked."));
 		}
-	}
-
-	/**
-	 * The three cooking stages (wireframes 6): Triggered -> Doing work ->
-	 * Assembling evidence. Shown in the left list preview; `compact` drops the
-	 * role/elapsed meta line for the tighter row layout.
-	 */
-	private renderCookingStages(task: ILogicalTask, compact = false): HTMLElement {
-		const wrap = $('.inbox-one-cooking');
-		if (compact) {
-			wrap.classList.add('compact');
-		}
-		const active = task.state === LogicalTaskState.Confirming ? 2 : 1;
-		const labels = [
-			localize('inboxOne.stageTriggered', 'Triggered'),
-			localize('inboxOne.stageDoing', 'Doing work'),
-			localize('inboxOne.stageAssembling', 'Assembling evidence'),
-		];
-		const stages = wrap.appendChild($('.inbox-one-cooking-stages'));
-		labels.forEach((label, i) => {
-			if (i > 0) {
-				stages.appendChild($(`.inbox-one-cooking-rail${i <= active ? '.filled' : ''}`));
-			}
-			const state = i < active ? 'done' : i === active ? 'active' : 'pending';
-			const stage = stages.appendChild($(`.inbox-one-cooking-stage.${state}`));
-			stage.appendChild($('span.inbox-one-cooking-dot', undefined, state === 'pending' ? '\u25cb' : '\u25cf'));
-			stage.appendChild($('span', undefined, label));
-		});
-		if (!compact) {
-			const attempt = task.attempts[task.currentAttempt];
-			const elapsed = formatElapsed(Date.now() - (attempt?.startedAt ?? task.createdAt));
-			wrap.appendChild($('.inbox-one-cooking-meta', undefined, `\u25b2 ${task.type} \u00b7 ${elapsed}`));
-		}
-		return wrap;
 	}
 
 	/** Opens the live worker session backing the current attempt (wireframes 6: [ Open ]). */
@@ -753,6 +731,58 @@ export class InboxOneView extends AbstractCustomView {
 			case LogicalTaskState.Completed: return localize('inboxOne.stateCompleted', 'completed');
 			case LogicalTaskState.Archived: return localize('inboxOne.stateArchived', 'archived');
 			default: return '';
+		}
+	}
+
+	/** The single current-state label for a list row (replaces the multi-step progress bar). */
+	private rowStateLabel(task: ILogicalTask): string {
+		switch (task.state) {
+			case LogicalTaskState.Blocked: return localize('inboxOne.rowBlocked', 'Needs input');
+			case LogicalTaskState.Decision:
+				if (task.evidence?.primaryAction) { return localize('inboxOne.rowReady', 'Ready for approval'); }
+				if (task.evidence?.customAsk) { return localize('inboxOne.rowDecide', 'Needs your decision'); }
+				return localize('inboxOne.rowReview', 'Ready to review');
+			case LogicalTaskState.Cooking: return localize('inboxOne.rowWorking', 'Working');
+			case LogicalTaskState.Confirming: return localize('inboxOne.rowAssembling', 'Assembling evidence');
+			case LogicalTaskState.Completed: return localize('inboxOne.rowComplete', 'Complete');
+			case LogicalTaskState.Archived: return localize('inboxOne.rowArchived', 'Archived');
+			default: return '';
+		}
+	}
+
+	/** For a needs-attention row: a short "what approval does" consequence, if the item has a typed action. */
+	private attentionConsequence(task: ILogicalTask): string | undefined {
+		if (task.state !== LogicalTaskState.Decision) {
+			return undefined;
+		}
+		const action = task.evidence?.primaryAction;
+		return action ? this.consequenceLine(action.actionType, action.payload) : undefined;
+	}
+
+	/** Concise, host-derived consequence copy for a typed action ("Creates 1 issue", "Merges PR #842"). */
+	private consequenceLine(actionType: ActionType, payload: unknown): string | undefined {
+		const p = (payload && typeof payload === 'object') ? payload as Record<string, unknown> : {};
+		const num = (k: string): number | undefined => typeof p[k] === 'number' ? p[k] as number : undefined;
+		const str = (k: string): string => typeof p[k] === 'string' ? p[k] as string : '';
+		const arrLen = (k: string): number => Array.isArray(p[k]) ? (p[k] as unknown[]).length : 0;
+		switch (actionType) {
+			case ActionType.ApprovePr: return localize('inboxOne.conseqApprove', 'Approves PR #{0}', num('prNumber') ?? '?');
+			case ActionType.MergePr: return localize('inboxOne.conseqMerge', 'Merges PR #{0}', num('prNumber') ?? '?');
+			case ActionType.CreateIssues: {
+				const n = arrLen('issues');
+				return n === 1 ? localize('inboxOne.conseqIssue1', 'Creates 1 issue') : localize('inboxOne.conseqIssueN', 'Creates {0} issues', n);
+			}
+			case ActionType.AddLabels: {
+				const n = arrLen('add');
+				return n === 1
+					? localize('inboxOne.conseqLabel1', 'Adds 1 label to #{0}', num('targetNumber') ?? '?')
+					: localize('inboxOne.conseqLabelN', 'Adds {0} labels to #{1}', n, num('targetNumber') ?? '?');
+			}
+			case ActionType.Comment: return localize('inboxOne.conseqComment', 'Comments on #{0}', num('targetNumber') ?? '?');
+			case ActionType.DispatchFix: return localize('inboxOne.conseqFix', 'Starts a fix');
+			case ActionType.Deploy: return localize('inboxOne.conseqDeploy', 'Deploys to {0}', str('env'));
+			case ActionType.GrantScope: return localize('inboxOne.conseqGrant', 'Grants {0}', str('scope'));
+			default: return undefined;
 		}
 	}
 
