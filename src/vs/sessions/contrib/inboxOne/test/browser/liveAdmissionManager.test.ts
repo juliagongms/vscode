@@ -149,6 +149,21 @@ suite('Inbox One - LiveAdmissionManager', () => {
 		assert.deepStrictEqual((await mgr.peek()).slots.map(s => s.taskId), [fresh]);
 	});
 
+	test('a dispatch burst cannot overshoot the cap before session refs land', async () => {
+		const { store, mgr } = await setup();
+		// Tasks are admitted one after another in the same tick, before any of them
+		// has launched a worker (no session ref yet). The durable slots must still
+		// hold the line at repoConcurrency = 2.
+		const ids: string[] = [];
+		for (let i = 0; i < 3; i++) {
+			const { task } = await store.upsertByGroupKey({ inboxId: 'my', repo: 'acme/api', groupKey: `acme/api:pr:${i}`, sourceEvent: ev('acme/api', String(i), `d${i}`), type: 'code-review', firstAttemptTrigger: AttemptTrigger.Hook });
+			ids.push(task.id);
+		}
+		assert.strictEqual(await mgr.tryReserve(ids[0], 0, 'acme/api'), AdmissionResult.Admitted);
+		assert.strictEqual(await mgr.tryReserve(ids[1], 0, 'acme/api'), AdmissionResult.Admitted);
+		assert.strictEqual(await mgr.tryReserve(ids[2], 0, 'acme/api'), AdmissionResult.QueuedRepoConcurrency);
+	});
+
 	test('credits reset on a new calendar day', async () => {
 		let clock = NOW;
 		const { store, mgr } = await setup({ ...CAPS, repoConcurrency: 10, globalConcurrency: 10, dailyCredits: 1 }, () => clock);

@@ -76,21 +76,24 @@ export class LiveAdmissionManager implements IAdmissionManager {
 	}
 
 	/**
-	 * Drops durable slots whose task is no longer running a worker. A slot is
-	 * released on resolve/cancel/fail, but any path that retires a task without
-	 * that release (an external edit, or a crash between landing and release)
-	 * would otherwise leave the slot reserved forever and permanently wedge the
-	 * repo's concurrency -- a dispatch that can only ever queue. The live store is
-	 * the source of truth for what is actually running, so reconciling the durable
-	 * set against exactly the same predicate {@link canAdmit} derives concurrency
-	 * from keeps it self-healing. `reservingTaskId` is always kept: it has a slot
-	 * but has not launched its worker yet, so reservation stays idempotent and
-	 * never spends a second credit on retry.
+	 * Drops durable slots whose task is no longer live. A slot is released on
+	 * resolve/cancel/fail, but any path that retires a task without that release
+	 * (an external edit, or a crash between landing and release) would otherwise
+	 * leave the slot reserved forever and permanently wedge the repo's
+	 * concurrency -- a dispatch that can only ever queue. Reconciling the durable
+	 * set against the live store keeps it self-healing.
+	 *
+	 * Liveness is deliberately by task state alone, not {@link hasLiveWorker}: a
+	 * task that has reserved a slot but not yet launched its worker is still
+	 * mid-dispatch, and dropping its slot would let a burst of dispatches
+	 * overshoot the cap before any of their session refs land. `reservingTaskId`
+	 * is always kept so reservation stays idempotent even before the task's own
+	 * state change is visible here.
 	 */
 	private pruneStaleSlots(state: IAdmissionState, reservingTaskId: string): IAdmissionState {
 		const live = new Set<string>([reservingTaskId]);
 		for (const task of this.store.tasks.get()) {
-			if ((task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) && hasLiveWorker(task)) {
+			if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
 				live.add(task.id);
 			}
 		}
