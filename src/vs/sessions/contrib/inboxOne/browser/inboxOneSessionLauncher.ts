@@ -129,17 +129,14 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 	async launch(firstMessage: string, options: ILaunchOptions): Promise<ISession | undefined> {
 		const request = { query: firstMessage, title: options.title, background: true };
 		// Ambient inbox sessions run fully autonomously (no human at the keyboard),
-		// so they must not stall on tool-approval prompts: mount them at Autopilot
-		// (auto-approve every tool call, auto-retry, and keep going until the task
-		// is done). This is the same permission level Automations use for unattended
-		// runs. We seed it two ways so it lands whichever provider hosts the session:
-		// `permissionLevel` for providers that implement setPermissionLevel (e.g. the
-		// cloud coding agent), and `automationConfiguration` for the agent host
-		// (Copilot CLI), which seeds its initial session config from it -- no bespoke
-		// approval handling, just the standard unattended-session config.
+		// so they must not stall on tool-approval prompts: mount them at Autopilot via
+		// `automationConfiguration` -- the same unattended-session primitive Automations
+		// use, and what the agent host (Copilot CLI) seeds its initial config from. We
+		// deliberately do NOT set the top-level `permissionLevel`: a normal New Session
+		// never does, and a provider whose `setPermissionLevel` throws (e.g.
+		// `default-copilot`) would otherwise fail the whole launch.
 		const autopilot = ChatPermissionLevel.Autopilot;
 		const createOptions: ICreateNewSessionOptions = {
-			permissionLevel: autopilot,
 			automationConfiguration: { permissionLevel: autopilot },
 			...(options.metadata ? { metadata: options.metadata } : {}),
 		};
@@ -147,7 +144,15 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 		try {
 			let session: ISession | undefined;
 			if (folder) {
-				session = await this.sessions.createAndSendNewChatRequest(folder, request, createOptions);
+				// Start on exactly the provider a human's New Session would use here: the
+				// folder's preferred (first) session type. Reusing this composer primitive
+				// keeps the inbox on the same runtime as normal chat sessions instead of
+				// whatever the service picks as a bare default.
+				const preferred = this.sessions.getSessionTypesForFolder(folder)[0];
+				const folderOptions = preferred
+					? { ...createOptions, providerId: preferred.providerId, sessionTypeId: preferred.sessionType.id }
+					: createOptions;
+				session = await this.sessions.createAndSendNewChatRequest(folder, request, folderOptions);
 			} else if (this.sessions.isQuickChatTargetAvailable()) {
 				// No servable workspace folder: use the composer's "Start without a
 				// backing workspace" default -- a workspace-less session on whatever

@@ -23,19 +23,22 @@ class FakeSessions {
 	/** URIs that can host a session. */
 	servable = new Set<string>();
 	quickChatAvailable = false;
-	created: Array<{ folder: URI | undefined; query: string; title?: string; metadata?: Record<string, unknown>; permissionLevel?: string; autopilotConfig?: string }> = [];
+	/** The folder's session types (first is the preferred one the composer would pick). */
+	sessionTypes: Array<{ providerId: string; sessionType: { id: string } }> = [{ providerId: 'local-agent-host', sessionType: { id: 'copilotcli' } }];
+	created: Array<{ folder: URI | undefined; query: string; title?: string; metadata?: Record<string, unknown>; providerId?: string; sessionTypeId?: string; permissionLevel?: string; autopilotConfig?: string }> = [];
 	relayed: Array<{ ref: string; query: string }> = [];
 	sessionsByRef = new Map<string, ISession>();
 	createResult: ISession | undefined;
 
 	isNewSessionTargetAvailable(folder: URI): boolean { return this.servable.has(folder.toString()); }
 	isQuickChatTargetAvailable(): boolean { return this.quickChatAvailable; }
-	async createAndSendNewChatRequest(folder: URI, options: { query: string; title?: string }, createOptions?: { metadata?: Record<string, unknown>; permissionLevel?: string; automationConfiguration?: { permissionLevel?: string } }): Promise<ISession | undefined> {
-		this.created.push({ folder, query: options.query, title: options.title, metadata: createOptions?.metadata, permissionLevel: createOptions?.permissionLevel, autopilotConfig: createOptions?.automationConfiguration?.permissionLevel });
+	getSessionTypesForFolder(_folder: URI): Array<{ providerId: string; sessionType: { id: string } }> { return this.sessionTypes; }
+	async createAndSendNewChatRequest(folder: URI, options: { query: string; title?: string }, createOptions?: { metadata?: Record<string, unknown>; providerId?: string; sessionTypeId?: string; permissionLevel?: string; automationConfiguration?: { permissionLevel?: string } }): Promise<ISession | undefined> {
+		this.created.push({ folder, query: options.query, title: options.title, metadata: createOptions?.metadata, providerId: createOptions?.providerId, sessionTypeId: createOptions?.sessionTypeId, permissionLevel: createOptions?.permissionLevel, autopilotConfig: createOptions?.automationConfiguration?.permissionLevel });
 		return this.createResult;
 	}
-	async createAndSendQuickChatRequest(options: { query: string; title?: string }, createOptions?: { metadata?: Record<string, unknown>; permissionLevel?: string; automationConfiguration?: { permissionLevel?: string } }): Promise<ISession | undefined> {
-		this.created.push({ folder: undefined, query: options.query, title: options.title, metadata: createOptions?.metadata, permissionLevel: createOptions?.permissionLevel, autopilotConfig: createOptions?.automationConfiguration?.permissionLevel });
+	async createAndSendQuickChatRequest(options: { query: string; title?: string }, createOptions?: { metadata?: Record<string, unknown>; providerId?: string; sessionTypeId?: string; permissionLevel?: string; automationConfiguration?: { permissionLevel?: string } }): Promise<ISession | undefined> {
+		this.created.push({ folder: undefined, query: options.query, title: options.title, metadata: createOptions?.metadata, providerId: createOptions?.providerId, sessionTypeId: createOptions?.sessionTypeId, permissionLevel: createOptions?.permissionLevel, autopilotConfig: createOptions?.automationConfiguration?.permissionLevel });
 		return this.createResult;
 	}
 	getSession(uri: URI): ISession | undefined { return this.sessionsByRef.get(uri.toString()); }
@@ -77,8 +80,10 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 		assert.strictEqual(sessions.created[0].folder!.toString(), folder.toString());
 		assert.strictEqual(sessions.created[0].query, 'hello');
 		assert.strictEqual(sessions.created[0].metadata!.a, 1);
-		assert.strictEqual(sessions.created[0].permissionLevel, 'autopilot', 'ambient sessions run at autopilot (auto-approve tools)');
-		assert.strictEqual(sessions.created[0].autopilotConfig, 'autopilot', 'autopilot is also seeded via automationConfiguration for the agent host');
+		assert.strictEqual(sessions.created[0].permissionLevel, undefined, 'no top-level permissionLevel (a normal New Session never sets one)');
+		assert.strictEqual(sessions.created[0].autopilotConfig, 'autopilot', 'autopilot is seeded via automationConfiguration for the agent host');
+		assert.strictEqual(sessions.created[0].providerId, 'local-agent-host', 'starts on the folder\'s preferred provider, like a normal New Session');
+		assert.strictEqual(sessions.created[0].sessionTypeId, 'copilotcli', 'starts on the folder\'s preferred session type');
 	});
 
 	test('tracks launched sessions as inbox-managed so conversation triage can skip them', async () => {
