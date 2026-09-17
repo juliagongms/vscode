@@ -1442,7 +1442,12 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 	}
 
 	public async getChatSessionHistory(sessionResource: URI, token: CancellationToken): Promise<readonly IChatSessionHistoryItem[]> {
-		const existing = this._sessions.get(this._resolveResource(sessionResource));
+		// A headless caller can retain the materialized resource after its real →
+		// untitled alias has already been registered. Check that exact cache key
+		// before resolving the alias or we skip the live turn and fetch a stale
+		// provider snapshot instead.
+		const existing = this._sessions.get(sessionResource)
+			?? this._sessions.get(this._resolveResource(sessionResource));
 		if (existing) {
 			return historyWithLiveTurn(existing.session, existing.chatSessionType);
 		}

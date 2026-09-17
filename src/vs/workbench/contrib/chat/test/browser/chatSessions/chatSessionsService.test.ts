@@ -1118,6 +1118,35 @@ suite('ChatSessionsService - lightweight history reads', () => {
 		});
 	});
 
+	test('reads a materialized session retained after its alias was registered', async () => {
+		const type = 'history-cached-materialized';
+		const untitled = URI.from({ scheme: type, path: '/untitled-session-1' });
+		const materialized = URI.from({ scheme: type, path: '/session-1' });
+		const part: IChatProgress = { kind: 'markdownContent', content: new MarkdownString('```inbox-one-result\n{}\n```') };
+		const progressObs = observableValue<IChatProgress[]>('progress', [part]);
+		const counters = { provided: 0, disposed: 0 };
+		store.add(service.registerChatSessionContribution({ type, name: type, displayName: type, description: '' }));
+		store.add(service.registerChatSessionContentProvider(type, {
+			provideChatSessionContent: async sessionResource => {
+				counters.provided++;
+				return {
+					sessionResource,
+					history: [],
+					progressObs,
+					onWillDispose: Event.None,
+					dispose: () => counters.disposed++,
+				};
+			},
+		}));
+
+		service.registerSessionResourceAlias(untitled, materialized);
+		await service.getOrCreateChatSession(materialized, CancellationToken.None);
+		const result = await service.getChatSessionHistory(materialized, CancellationToken.None);
+
+		assert.deepStrictEqual(result, [{ type: 'response', parts: [part], participant: type }]);
+		assert.deepStrictEqual(counters, { provided: 1, disposed: 0 }, 'uses the exact retained resource instead of fetching an empty aliased snapshot');
+	});
+
 	test('resolves alternative session types through their primary provider', async () => {
 		const type = 'history-primary';
 		const alternativeType = 'history-alternative';

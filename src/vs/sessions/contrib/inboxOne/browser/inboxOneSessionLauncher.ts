@@ -132,15 +132,19 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 	async launch(firstMessage: string, options: ILaunchOptions): Promise<ISession | undefined> {
 		const request = { query: firstMessage, title: options.title, background: true };
 		// Ambient inbox sessions run fully autonomously (no human at the keyboard),
-		// so they must not stall on tool-approval prompts: mount them at Autopilot via
-		// `automationConfiguration` -- the same unattended-session primitive Automations
-		// use, and what the agent host (Copilot CLI) seeds its initial config from. We
+		// so they must not stall on tool-approval prompts: seed Autopilot mode and
+		// Allow all permissions independently through `automationConfiguration`, the
+		// same unattended-session primitive Automations use. Passing the legacy
+		// combined `permissionLevel: 'autopilot'` would be migrated to Assisted.
+		// We
 		// deliberately do NOT set the top-level `permissionLevel`: a normal New Session
 		// never does, and a provider whose `setPermissionLevel` throws (e.g.
 		// `default-copilot`) would otherwise fail the whole launch.
-		const autopilot = ChatPermissionLevel.Autopilot;
 		const createOptions: ICreateNewSessionOptions = {
-			automationConfiguration: { permissionLevel: autopilot },
+			automationConfiguration: {
+				mode: ChatPermissionLevel.Autopilot,
+				permissionLevel: ChatPermissionLevel.AutoApprove,
+			},
 			...(options.metadata ? { metadata: options.metadata } : {}),
 		};
 		const folder = this.resolveDefaultFolder();
