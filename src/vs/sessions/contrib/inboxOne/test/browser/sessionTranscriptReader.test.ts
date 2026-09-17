@@ -7,7 +7,7 @@ import assert from 'assert';
 import { NullLogService } from '../../../../../platform/log/common/log.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { IChatSessionsService } from '../../../../../workbench/contrib/chat/common/chatSessionsService.js';
-import { readSessionResponseText } from '../../browser/sessionTranscriptReader.js';
+import { readChatModelResponseText, readSessionResponseText } from '../../browser/sessionTranscriptReader.js';
 
 const MARK = '```inbox-one-result';
 
@@ -22,6 +22,17 @@ function fakeChatSessions(history: readonly unknown[]): IChatSessionsService {
 }
 
 suite('Inbox One - sessionTranscriptReader', () => {
+
+	test('reads only the latest completed chat-model turn', () => {
+		const model = {
+			getRequests: () => [
+				{ response: { response: { value: [{ kind: 'markdownContent', content: { value: 'stale' } }] } } },
+				{ response: { response: { value: [{ kind: 'markdownContent', content: { value: `${MARK}\n{"title":"fresh"}\n\`\`\`` } }] } } },
+			],
+		};
+
+		assert.strictEqual(readChatModelResponseText(model as never), `${MARK}\n{"title":"fresh"}\n\`\`\``);
+	});
 
 	ensureNoDisposablesAreLeakedInTestSuite();
 

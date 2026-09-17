@@ -8,12 +8,23 @@ import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IChatProgress } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
+import { IChatModel, IChatProgressResponseContent } from '../../../../workbench/contrib/chat/common/model/chatModel.js';
 import { IChatSessionsService } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
 
 /** How many times to poll the transcript before giving up on the marker. */
 const DEFAULT_MAX_ATTEMPTS = 6;
 /** Delay between transcript polls (ms). */
 const DEFAULT_RETRY_DELAY_MS = 1500;
+
+/** Reads only the most recent turn from the live chat model used to run it. */
+export function readChatModelResponseText(model: IChatModel): string | undefined {
+	const parts = model.getRequests().at(-1)?.response?.response.value;
+	if (!parts) {
+		return undefined;
+	}
+	const text = responseText(parts);
+	return text.trim().length > 0 ? text : undefined;
+}
 
 /**
  * Reads a background agent session's transcript by resource and returns the
@@ -107,7 +118,7 @@ export async function readSessionResponseText(
 }
 
 /** Concatenates the markdown text of a response's progress parts. */
-function responseText(parts: readonly IChatProgress[]): string {
+function responseText(parts: readonly (IChatProgress | IChatProgressResponseContent)[]): string {
 	let text = '';
 	for (const part of parts) {
 		if (part.kind === 'markdownContent') {

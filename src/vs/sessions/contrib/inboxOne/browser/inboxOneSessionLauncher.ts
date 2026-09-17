@@ -126,7 +126,7 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 	}
 
 	canLaunch(): boolean {
-		return !!this.resolveDefaultFolder() || this.sessions.isQuickChatTargetAvailable();
+		return this.sessions.isQuickChatTargetAvailable() || !!this.resolveDefaultFolder();
 	}
 
 	async launch(firstMessage: string, options: ILaunchOptions): Promise<ISession | undefined> {
@@ -150,7 +150,12 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 		const folder = this.resolveDefaultFolder();
 		try {
 			let session: ISession | undefined;
-			if (folder) {
+			if (this.sessions.isQuickChatTargetAvailable()) {
+				// Ambient GitHub work is not necessarily related to the folder open
+				// in this window. Keep it in General chats rather than silently
+				// giving a worker the wrong repository as its workspace.
+				session = await this.sessions.createAndSendQuickChatRequest(request, createOptions);
+			} else if (folder) {
 				// Start on exactly the provider a human's New Session would use here: the
 				// folder's preferred (first) session type. Reusing this composer primitive
 				// keeps the inbox on the same runtime as normal chat sessions instead of
@@ -160,11 +165,6 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 					? { ...createOptions, providerId: preferred.providerId, sessionTypeId: preferred.sessionType.id }
 					: createOptions;
 				session = await this.sessions.createAndSendNewChatRequest(folder, request, folderOptions);
-			} else if (this.sessions.isQuickChatTargetAvailable()) {
-				// No servable workspace folder: use the composer's "Start without a
-				// backing workspace" default -- a workspace-less session on whatever
-				// target the New Session composer would use here.
-				session = await this.sessions.createAndSendQuickChatRequest(request, createOptions);
 			} else {
 				this.logService.info(`[inboxOne] no session target available to launch ${options.activity} (open a workspace as you would for a New Session)`);
 				return undefined;

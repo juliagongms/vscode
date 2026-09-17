@@ -79,10 +79,11 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 		};
 	}
 
-	test('launches in the open workspace folder when it can host a session', async () => {
+	test('prefers General chats even when an unrelated workspace is open', async () => {
 		const sessions = new FakeSessions();
 		const folder = URI.file('/repo');
 		sessions.servable.add(folder.toString());
+		sessions.quickChatAvailable = true;
 		sessions.createResult = fakeSession('agent-host-session://worker-1');
 		const { launcher, chatSessions } = make(sessions, folder, []);
 
@@ -90,15 +91,27 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 
 		assert.strictEqual(session?.resource.toString(), 'agent-host-session://worker-1');
 		assert.strictEqual(sessions.created.length, 1);
-		assert.strictEqual(sessions.created[0].folder!.toString(), folder.toString());
+		assert.strictEqual(sessions.created[0].folder, undefined);
 		assert.strictEqual(sessions.created[0].query, 'hello');
 		assert.strictEqual(sessions.created[0].metadata!.a, 1);
 		assert.strictEqual(sessions.created[0].permissionLevel, undefined, 'no top-level permissionLevel (a normal New Session never sets one)');
 		assert.strictEqual(sessions.created[0].modeConfig, 'autopilot', 'autopilot mode is seeded via automationConfiguration for the agent host');
 		assert.strictEqual(sessions.created[0].approvalConfig, 'autoApprove', 'Allow all permissions are seeded separately so they are not migrated to Assisted');
-		assert.strictEqual(sessions.created[0].providerId, 'local-agent-host', 'starts on the folder\'s preferred provider, like a normal New Session');
-		assert.strictEqual(sessions.created[0].sessionTypeId, 'copilotcli', 'starts on the folder\'s preferred session type');
+		assert.strictEqual(sessions.created[0].providerId, undefined, 'lets General chats select its configured provider');
+		assert.strictEqual(sessions.created[0].sessionTypeId, undefined, 'does not leak the unrelated workspace session type');
 		assert.deepStrictEqual(chatSessions.retained, ['agent-host-session://worker-1'], 'retains the live session so its finished turn is parseable');
+	});
+
+	test('uses the open workspace when General chats is unavailable', async () => {
+		const sessions = new FakeSessions();
+		const folder = URI.file('/repo');
+		sessions.servable.add(folder.toString());
+		sessions.createResult = fakeSession('agent-host-session://worker-1');
+		const { launcher } = make(sessions, folder, []);
+
+		await launcher.launch('hello', { title: 'T', activity: 'worker' });
+
+		assert.strictEqual(sessions.created[0].folder!.toString(), folder.toString());
 	});
 
 	test('tracks launched sessions as inbox-managed so conversation triage can skip them', async () => {
