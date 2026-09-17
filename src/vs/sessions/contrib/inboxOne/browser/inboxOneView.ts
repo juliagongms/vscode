@@ -490,6 +490,8 @@ export class InboxOneView extends AbstractCustomView {
 			case LogicalTaskState.Cooking:
 			case LogicalTaskState.Confirming:
 				return localize('inboxOne.inProgress', 'In progress');
+			case LogicalTaskState.Blocked:
+				return `${localize('inboxOne.needsAttention', 'Needs attention')} \u00b7 ${localize('inboxOne.rowBlocked', 'Needs input')}`;
 			case LogicalTaskState.Completed:
 				return localize('inboxOne.complete', 'Complete');
 			case LogicalTaskState.Archived:
@@ -622,19 +624,22 @@ export class InboxOneView extends AbstractCustomView {
 	}
 
 	/**
-	 * The Blocked recovery layout (wireframes 7): a distinct "! BLOCKED" header,
-	 * what is blocked, and the single recovery step, with a primary action that
-	 * supplies the fact/permission (-> back to Cooking), plus Steer and Dismiss.
+	 * The Blocked recovery layout, in the refined visual language: the same eyebrow
+	 * + meta as a decision, a calm "What I need" panel, and controls consistent with
+	 * the decision footer (I've unblocked this / Request changes / Not now).
 	 */
 	private renderBlockedDetail(detail: HTMLElement, task: ILogicalTask): void {
-		const pack = task.evidence;
-		const subject = task.sourceEvent.subject;
-		detail.appendChild($('.inbox-one-detail-blocked-tier', undefined, `\u0021 ${localize('inboxOne.blockedLabel', 'BLOCKED')} \u00b7 ${task.type}`));
+		detail.appendChild($('.inbox-one-detail-eyebrow', undefined, this.detailEyebrow(task)));
 		detail.appendChild($('h2.inbox-one-detail-title', undefined, this.listTitle(task)));
-		if (pack?.decisionSentence) {
-			detail.appendChild($('.inbox-one-detail-summary', undefined, pack.decisionSentence));
+
+		const meta = detail.appendChild($('.inbox-one-detail-meta'));
+		if (task.repo) {
+			meta.appendChild($('span', undefined, task.repo));
+			meta.appendChild($('span.inbox-one-detail-dot-sep', undefined, '\u00b7'));
 		}
-		detail.appendChild($('.inbox-one-detail-sub', undefined, `${task.repo ?? ''}${task.repo ? ' \u00b7 ' : ''}${subject.kind} ${subject.id}`));
+		meta.appendChild($('span', undefined, localize('inboxOne.updatedAgo', 'Updated {0}', formatElapsed(Date.now() - task.updatedAt))));
+		const openLink = meta.appendChild($('a.inbox-one-detail-open-session', undefined, localize('inboxOne.openFullSession', 'Open full session \u2192')));
+		this._register(addClick(openLink, () => this.openWorkerSession(task)));
 
 		const need = detail.appendChild($('.inbox-one-blocked-need'));
 		need.appendChild($('span.inbox-one-blocked-need-label', undefined, localize('inboxOne.whatINeed', 'What I need: ')));
@@ -643,10 +648,10 @@ export class InboxOneView extends AbstractCustomView {
 		const actions = detail.appendChild($('.inbox-one-detail-actions'));
 		const supply = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${localize('inboxOne.provideAndRetry', "I've unblocked this")} \u25b8`));
 		this._register(addClick(supply, () => this.recoverySupplied(task)));
-		const steer = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.steer', 'Steer')));
-		this._register(addClick(steer, () => this.steer(task)));
-		const dismiss = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.dismiss', 'Dismiss')));
-		this._register(addClick(dismiss, () => this.dismiss(task)));
+		const requestChanges = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.requestChanges', 'Request changes')));
+		this._register(addClick(requestChanges, () => this.steer(task)));
+		const notNow = actions.appendChild($('button.inbox-one-action.inbox-one-action-quiet', undefined, localize('inboxOne.notNow', 'Not now')));
+		this._register(addClick(notNow, () => this.dismiss(task)));
 
 		this.renderInlineComposer(detail, task);
 	}

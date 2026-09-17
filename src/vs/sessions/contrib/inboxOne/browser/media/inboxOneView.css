@@ -220,21 +220,14 @@
 	text-decoration: underline;
 }
 
-/* Blocked recovery layout (wireframes 7). */
-.inbox-one-detail-blocked-tier {
-	font-size: 11px;
-	font-weight: 700;
-	letter-spacing: 0.08em;
-	color: var(--vscode-editorWarning-foreground, var(--vscode-notificationsWarningIcon-foreground, #cca700));
-	margin-bottom: 6px;
-}
-
+/* Blocked recovery: a calm "What I need" panel with a subtle accent. */
 .inbox-one-blocked-need {
-	margin: 12px 0;
+	margin: 4px 0 4px 0;
 	padding: 10px 12px;
 	border-radius: 8px;
-	border: 1px solid var(--vscode-editorWarning-foreground, #cca700);
-	background: var(--vscode-inputValidation-warningBackground, transparent);
+	border: 1px solid var(--vscode-panel-border, transparent);
+	border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+	background: var(--vscode-editorWidget-background);
 	font-size: 13px;
 	line-height: 1.5;
 }
