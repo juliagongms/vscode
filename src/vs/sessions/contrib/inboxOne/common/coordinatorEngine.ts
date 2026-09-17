@@ -159,23 +159,36 @@ export class CoordinatorEngine {
 				// evidence-bearing result; leave its inbox item for the human to clear.
 				if (task.type === 'conversation') {
 					this.logService.trace(`[inboxOne] conversation ${event.sessionId} finished`);
-				} else if (!await this.tryLandWorkerResult(task) && !await this.tryRequestFinalize(task)) {
-					// The worker went idle (turn/task complete) but emitted no parseable
-					// result, even after a finalize nudge: land a coherent, steerable
-					// item asking for direction rather than an empty Decision.
-					await this.landUnfinished(task);
+				} else {
+					const outcome = await this.landOrReport(task);
+					if (outcome === 'no-block') {
+						// The worker produced a final message but no usable emit-result:
+						// nudge it to finalize once; if already nudged, land a steerable item.
+						if (!await this.tryRequestFinalize(task)) {
+							await this.landUnfinished(task);
+						}
+					} else if (outcome === 'empty') {
+						// Completed with no content yet -- the session likely went idle
+						// between turns. Keep the item Cooking and wait for the turn that
+						// emits the result rather than giving up prematurely.
+						this.logService.trace(`[inboxOne] task ${task.id} finished with no content yet; waiting for the worker`);
+					}
 				}
 				break;
 			case 'needs_input':
 				// The worker is blocked waiting on a human (autopilot auto-approves
 				// tools, so this is a genuine ask, not a routine tool pause). Land a
 				// result if one is already present, else surface the recovery step.
-				if (task.type !== 'conversation' && !await this.tryLandWorkerResult(task)) {
+				if (task.type !== 'conversation' && await this.landOrReport(task) !== 'landed') {
 					await this.store.transition(task.id, TaskTrigger.Blocker, { recoveryStep: 'Worker needs input.' });
 				}
 				break;
 			case 'failed':
-				await this.landUnfinished(task);
+				// A hard session error will not resume, so land a coherent item unless a
+				// result is somehow already present.
+				if (await this.landOrReport(task) !== 'landed') {
+					await this.landUnfinished(task);
+				}
 				break;
 			case 'progress':
 				// The worker resumed to In Progress. If it was Blocked awaiting a
@@ -195,50 +208,53 @@ export class CoordinatorEngine {
 	}
 
 	/**
-	 * Reads a worker's emitted result and, if it is a valid emit-result, HOST-
-	 * validates it into an evidence pack, HOST-computes the tier + plain-language
-	 * rank reason, and lands it as a Decision (technical spec 2.3). Returns whether
-	 * a decision was landed; `false` means no valid result yet (the caller decides
-	 * whether that is a failed attempt or a genuine block). Nothing here is
-	 * authored by the model except the raw candidate the host validates.
+	 * Reads a worker's emitted result and returns how the read resolved:
+	 *  - `landed`   - a valid emit-result was found, HOST-validated into an evidence
+	 *                 pack, ranked, and transitioned to a Decision.
+	 *  - `no-block` - the worker produced a final message but it had no usable
+	 *                 emit-result (missing/invalid); the caller may nudge/land it.
+	 *  - `empty`    - nothing to act on yet (no reader/session, or the session
+	 *                 completed with no content -- e.g. idle between turns); the
+	 *                 caller must KEEP WAITING rather than give up.
+	 * Nothing here is authored by the model except the raw candidate the host validates.
 	 */
-	private async tryLandWorkerResult(task: ILogicalTask): Promise<boolean> {
+	private async landOrReport(task: ILogicalTask): Promise<'landed' | 'no-block' | 'empty'> {
 		if (!this.resultReader) {
-			// No reader wired (e.g. pure-logic tests); the lifecycle signal is
-			// recorded but evidence lands via another path.
-			return false;
+			// No reader wired (e.g. pure-logic tests); evidence lands via another path.
+			return 'empty';
 		}
 		const sessionRef = currentAttempt(task)?.sessionRef;
 		if (!sessionRef) {
-			return false;
+			return 'empty';
 		}
 
-		let output;
+		let read;
 		try {
-			output = await this.resultReader.read(task, sessionRef);
+			read = await this.resultReader.read(task, sessionRef);
 		} catch (err) {
 			this.logService.error(`[inboxOne] reading worker result for task ${task.id} failed`, err);
-			return false;
+			return 'empty';
 		}
-		if (!output) {
-			return false;
-		}
-
-		const validated = validateWorkerResult(output.result);
-		if (!validated.ok) {
+		if (read.output) {
+			const validated = validateWorkerResult(read.output.result);
+			if (validated.ok) {
+				await this.store.setEvidence(task.id, validated.evidence);
+				const ranked = rank(read.output.signals);
+				await this.store.transition(task.id, TaskTrigger.EvidenceAssembled, {
+					tier: ranked.tier,
+					rank: ranked.rank,
+					rankReason: ranked.reason,
+				});
+				this.logService.info(`[inboxOne] task ${task.id} landed as ${ranked.tier}: ${ranked.reason}`);
+				return 'landed';
+			}
 			this.logService.warn(`[inboxOne] worker result for task ${task.id} rejected: ${validated.problems.join('; ')}`);
-			return false;
+			return 'no-block';
 		}
-
-		await this.store.setEvidence(task.id, validated.evidence);
-		const ranked = rank(output.signals);
-		await this.store.transition(task.id, TaskTrigger.EvidenceAssembled, {
-			tier: ranked.tier,
-			rank: ranked.rank,
-			rankReason: ranked.reason,
-		});
-		this.logService.info(`[inboxOne] task ${task.id} landed as ${ranked.tier}: ${ranked.reason}`);
-		return true;
+		// A real final message with no usable block is a genuine miss; an empty read
+		// means the worker is not actually done (idle between turns / premature
+		// completion) -- do not treat that as a finish.
+		return read.hadContent ? 'no-block' : 'empty';
 	}
 
 	/**

@@ -90,22 +90,27 @@ suite('Inbox One - TranscriptWorkerResultReader', () => {
 
 	test('reads, parses, and derives signals into a ranked output', async () => {
 		const reader = new TranscriptWorkerResultReader(new FakeTranscript(GOOD_BLOCK));
-		const output = await reader.read(task('pr'), 'agent-host-session://acme/w1');
-		assert.ok(output);
-		assert.strictEqual(output!.result.actionType, 'approve_pr');
+		const read = await reader.read(task('pr'), 'agent-host-session://acme/w1');
+		assert.ok(read.output);
+		assert.strictEqual(read.hadContent, true);
+		assert.strictEqual(read.output!.result.actionType, 'approve_pr');
 		// The derived signals produce a real tier via the host ranker (not hardcoded).
-		const ranked = rank(output!.signals);
+		const ranked = rank(read.output!.signals);
 		assert.ok([InboxOneTier.Urgent, InboxOneTier.Fyi, InboxOneTier.Critical].includes(ranked.tier));
 		assert.ok(ranked.reason.length > 0);
 	});
 
-	test('returns undefined when the transcript has no result block', async () => {
+	test('reports content-without-a-block when the transcript has prose but no result block', async () => {
 		const reader = new TranscriptWorkerResultReader(new FakeTranscript('just some prose'));
-		assert.strictEqual(await reader.read(task('pr'), 'ref'), undefined);
+		const read = await reader.read(task('pr'), 'ref');
+		assert.strictEqual(read.output, undefined);
+		assert.strictEqual(read.hadContent, true, 'the worker produced text, just no parseable block');
 	});
 
-	test('returns undefined when there is no transcript', async () => {
+	test('reports an empty read when there is no transcript content', async () => {
 		const reader = new TranscriptWorkerResultReader(new FakeTranscript(undefined));
-		assert.strictEqual(await reader.read(task('pr'), 'ref'), undefined);
+		const read = await reader.read(task('pr'), 'ref');
+		assert.strictEqual(read.output, undefined);
+		assert.strictEqual(read.hadContent, false, 'nothing was produced yet -- the caller must keep waiting');
 	});
 });

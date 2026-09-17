@@ -27,13 +27,27 @@ export interface IWorkerOutput {
 	readonly signals: IRankSignals;
 }
 
+/**
+ * The outcome of reading a worker's transcript tail. `output` is present only
+ * when a parseable emit-result was found. `hadContent` reports whether the worker
+ * produced ANY final assistant text at all -- the engine uses this to tell a
+ * genuine "finished with prose but no result block" (nudge/land-unfinished) apart
+ * from an EMPTY read (the session went idle between turns / completed prematurely,
+ * so we must keep waiting rather than give up).
+ */
+export interface IWorkerReadResult {
+	readonly output?: IWorkerOutput;
+	readonly hadContent: boolean;
+}
+
 export interface IWorkerResultReader {
 	/**
-	 * Reads the emitted result for a finished worker session, or `undefined` when
-	 * none is available yet or it cannot be parsed (the engine then treats the
-	 * attempt as failed). Never throws for a missing result.
+	 * Reads the emitted result for a worker session. Never throws. `output` is set
+	 * only when a parseable emit-result was found; `hadContent` says whether the
+	 * worker produced any final text (so the caller can distinguish an empty/idle
+	 * read from a real result-less finish).
 	 */
-	read(task: ILogicalTask, sessionRef: string): Promise<IWorkerOutput | undefined>;
+	read(task: ILogicalTask, sessionRef: string): Promise<IWorkerReadResult>;
 }
 
 /**
@@ -55,15 +69,15 @@ export interface ITranscriptSource {
 export class TranscriptWorkerResultReader implements IWorkerResultReader {
 	constructor(private readonly source: ITranscriptSource) { }
 
-	async read(task: ILogicalTask, sessionRef: string): Promise<IWorkerOutput | undefined> {
+	async read(task: ILogicalTask, sessionRef: string): Promise<IWorkerReadResult> {
 		const text = await this.source.readFinalMessage(task, sessionRef);
-		if (!text) {
-			return undefined;
+		if (!text || !text.trim()) {
+			return { hadContent: false };
 		}
 		const result = parseWorkerResult(text);
 		if (!result) {
-			return undefined;
+			return { hadContent: true };
 		}
-		return { result, signals: deriveRankSignals(result, task) };
+		return { output: { result, signals: deriveRankSignals(result, task) }, hadContent: true };
 	}
 }

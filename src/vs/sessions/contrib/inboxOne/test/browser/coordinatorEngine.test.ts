@@ -15,7 +15,7 @@ import { InboxOneStore } from '../../browser/inboxOneStore.js';
 import { AutonomyLevel, IInboxOneSettings, INotificationPreferences, IRepoEnrollment } from '../../common/inboxOneSettings.js';
 import { EventSource, IEventSubject, IIngressEvent, LogicalTaskState, ActionType, InboxOneTier, AttemptTrigger } from '../../common/inboxOneTypes.js';
 import { IWorkerDispatcher, IWorkerDispatchRequest, IWorkerDispatchResult } from '../../common/workerDispatcher.js';
-import { IWorkerOutput, IWorkerResultReader } from '../../common/workerResult.js';
+import { IWorkerOutput, IWorkerReadResult, IWorkerResultReader } from '../../common/workerResult.js';
 import { TaskTrigger } from '../../common/inboxOneStateMachine.js';
 
 class InMemoryCasStorage implements IAutomationStorageService {
@@ -90,10 +90,12 @@ class FakeDispatcher implements IWorkerDispatcher {
 
 class FakeResultReader implements IWorkerResultReader {
 	output: IWorkerOutput | undefined;
+	/** Whether the worker produced a final message (content) when there is no parseable output. */
+	hadContent = true;
 	reads: string[] = [];
-	async read(_task: unknown, sessionRef: string): Promise<IWorkerOutput | undefined> {
+	async read(_task: unknown, sessionRef: string): Promise<IWorkerReadResult> {
 		this.reads.push(sessionRef);
-		return this.output;
+		return { output: this.output, hadContent: this.output ? true : this.hadContent };
 	}
 }
 
@@ -272,8 +274,13 @@ suite('Inbox One - coordinator engine', () => {
 		assert.strictEqual(after.attempts[after.currentAttempt].sessionRef, `session://worker/${sessionId}`, 'keeps the same live worker session');
 	});
 
-	test('a task_finished with no result asks the worker to finalize once, then fails', async () => {
-		const { store, dispatcher, engine } = build();
+	test('a task_finished with a result-less final message asks the worker to finalize once, then fails', async () => {
+		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
+		const reader = new FakeResultReader();
+		reader.output = undefined;
+		reader.hadContent = true; // the worker produced a final message, just no parseable result block
+		const dispatcher = new FakeDispatcher();
+		const engine = new CoordinatorEngine('my', store, new FakeSettings([{ repo: 'acme/api', active: true }]), new FakeAdmission(), dispatcher, new NullLogService(), undefined, reader);
 		await engine.handleEvent(prEvent());
 		const task = store.tasks.get()[0];
 		const sessionRef = task.attempts[0].sessionRef!;
@@ -290,6 +297,35 @@ suite('Inbox One - coordinator engine', () => {
 		await engine.handleEvent({ ...finished, deliveryId: 'tf1b' });
 		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Decision);
 		assert.strictEqual(dispatcher.relays.length, 1, 'finalize is not relayed twice for one attempt');
+	});
+
+	test('a task_finished with NO content yet keeps the item Cooking (premature/idle completion, not a fail)', async () => {
+		// The session can report a turn complete while the worker is still working (no
+		// assistant text yet). That must NOT be treated as "finished without a result":
+		// the item stays Cooking and waits for the turn that actually emits the block.
+		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
+		const reader = new FakeResultReader();
+		reader.output = undefined;
+		reader.hadContent = false; // empty read -- the worker has produced nothing yet
+		const dispatcher = new FakeDispatcher();
+		const engine = new CoordinatorEngine('my', store, new FakeSettings([{ repo: 'acme/api', active: true }]), new FakeAdmission(), dispatcher, new NullLogService(), undefined, reader);
+		await engine.handleEvent(prEvent());
+		const task = store.tasks.get()[0];
+		const sessionId = task.attempts[0].sessionRef!.replace('session://worker/', '');
+		const finished = { deliveryId: 'e1', source: EventSource.Session, sessionId, type: 'task_finished' as const, subject: { kind: 'session' as const, id: sessionId }, receivedAt: 0 };
+
+		await engine.handleEvent(finished);
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Cooking, 'no premature fail on an empty read');
+		assert.strictEqual(dispatcher.relays.length, 0, 'no finalize nudge on an empty read');
+
+		// Even a second empty completion does not give up.
+		await engine.handleEvent({ ...finished, deliveryId: 'e2' });
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Cooking, 'still cooking -- waits for the worker to emit its result');
+
+		// When the worker finally emits a valid result, it lands normally.
+		reader.output = validOutput();
+		await engine.handleEvent({ ...finished, deliveryId: 'e3' });
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Decision, 'lands once the worker actually produces a result');
 	});
 
 	test('a needs_input turn that already produced a valid result lands a decision, not a block', async () => {
