@@ -106,7 +106,7 @@ export class InboxOneView extends AbstractCustomView {
 		this.description = this.store.tasks.map(tasks => {
 			const cooking = tasks.filter(t => t.state === LogicalTaskState.Cooking || t.state === LogicalTaskState.Confirming).length;
 			const decisions = tasks.filter(t => t.state === LogicalTaskState.Decision || t.state === LogicalTaskState.Blocked).length;
-			return localize('inboxOne.desc', 'Diffy - {0} need you, {1} cooking', decisions, cooking);
+			return localize('inboxOne.desc', 'Diffy - {0} need you, {1} in progress', decisions, cooking);
 		});
 	}
 
@@ -239,7 +239,7 @@ export class InboxOneView extends AbstractCustomView {
 
 		const brief = detail.appendChild($('.inbox-one-diffy-brief'));
 		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefNeed', '{0} need you', decisions.length)));
-		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefCooking', '{0} cooking', cooking.length)));
+		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefCooking', '{0} in progress', cooking.length)));
 		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefAuto', '{0} auto-handled and logged', autoHandled.length)));
 
 		const settingsLink = brief.appendChild($('a.inbox-one-claim-receipt', undefined, localize('inboxOne.openSettings', 'Coordinator settings')));
@@ -300,7 +300,7 @@ export class InboxOneView extends AbstractCustomView {
 	private diffyReply(prompt: string, needYou: number, cooking: number, repos: number): string {
 		const lower = prompt.toLowerCase();
 		if (lower.includes('brief') || lower.includes('status')) {
-			return localize('inboxOne.diffyBrief', 'Across {0} repo(s): {1} need you, {2} cooking. Nothing else cleared the bar.', repos, needYou, cooking);
+			return localize('inboxOne.diffyBrief', 'Across {0} repo(s): {1} need you, {2} in progress. Nothing else cleared the bar.', repos, needYou, cooking);
 		}
 		return localize('inboxOne.diffyAck', "Got it. I'll factor that into how I triage and dispatch.");
 	}
