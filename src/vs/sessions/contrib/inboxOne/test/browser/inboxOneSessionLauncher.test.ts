@@ -9,6 +9,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { NullLogService } from '../../../../../platform/log/common/log.js';
 import { TestStorageService } from '../../../../../workbench/test/common/workbenchTestServices.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+import { IChatSessionsService } from '../../../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { ISession } from '../../../../services/sessions/common/session.js';
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
@@ -48,6 +49,15 @@ class FakeSessions {
 	asService(): ISessionsManagementService { return this as unknown as ISessionsManagementService; }
 }
 
+class FakeChatSessions {
+	readonly retained: string[] = [];
+	async getOrCreateChatSession(resource: URI): Promise<{ readonly sessionResource: URI; readonly history: never[]; dispose(): void }> {
+		this.retained.push(resource.toString());
+		return { sessionResource: resource, history: [], dispose() { } };
+	}
+	asService(): IChatSessionsService { return this as unknown as IChatSessionsService; }
+}
+
 function fakeRecents(roots: URI[]): ISessionsRecentWorkspacesService {
 	return {
 		getRecentWorkspaces: () => roots.map(root => ({ workspace: { folders: [{ root }] }, providerId: 'p', checked: false })),
@@ -62,8 +72,11 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
-	function make(sessions: FakeSessions, localFolder: URI | undefined, recents: URI[]) {
-		return new InboxOneSessionLauncher(sessions.asService(), fakeRecents(recents), fakeWorkspace(localFolder), disposables.add(new TestStorageService()), disposables.add(new NullLogService()));
+	function make(sessions: FakeSessions, localFolder: URI | undefined, recents: URI[], chatSessions = new FakeChatSessions()) {
+		return {
+			launcher: new InboxOneSessionLauncher(sessions.asService(), fakeRecents(recents), fakeWorkspace(localFolder), disposables.add(new TestStorageService()), chatSessions.asService(), disposables.add(new NullLogService())),
+			chatSessions,
+		};
 	}
 
 	test('launches in the open workspace folder when it can host a session', async () => {
@@ -71,7 +84,7 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 		const folder = URI.file('/repo');
 		sessions.servable.add(folder.toString());
 		sessions.createResult = fakeSession('agent-host-session://worker-1');
-		const launcher = make(sessions, folder, []);
+		const { launcher, chatSessions } = make(sessions, folder, []);
 
 		const session = await launcher.launch('hello', { title: 'T', activity: 'worker', metadata: { a: 1 } });
 
@@ -84,6 +97,7 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 		assert.strictEqual(sessions.created[0].autopilotConfig, 'autopilot', 'autopilot is seeded via automationConfiguration for the agent host');
 		assert.strictEqual(sessions.created[0].providerId, 'local-agent-host', 'starts on the folder\'s preferred provider, like a normal New Session');
 		assert.strictEqual(sessions.created[0].sessionTypeId, 'copilotcli', 'starts on the folder\'s preferred session type');
+		assert.deepStrictEqual(chatSessions.retained, ['agent-host-session://worker-1'], 'retains the live session so its finished turn is parseable');
 	});
 
 	test('tracks launched sessions as inbox-managed so conversation triage can skip them', async () => {
@@ -91,7 +105,7 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 		const folder = URI.file('/repo');
 		sessions.servable.add(folder.toString());
 		sessions.createResult = fakeSession('agent-host-session://distiller-1');
-		const launcher = make(sessions, folder, []);
+		const { launcher } = make(sessions, folder, []);
 
 		assert.strictEqual(launcher.isManaged('agent-host-session://distiller-1'), false, 'unknown before launch');
 		await launcher.launch('run', { title: 'Diffy distiller', activity: 'distiller' });
@@ -107,7 +121,7 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 		// The window has no folder; the first recent is unservable, the second is.
 		sessions.servable.add(recent.toString());
 		sessions.createResult = fakeSession('agent-host-session://worker-2');
-		const launcher = make(sessions, undefined, [stale, recent]);
+		const { launcher } = make(sessions, undefined, [stale, recent]);
 
 		assert.strictEqual(launcher.canLaunch(), true);
 		const session = await launcher.launch('hi', { title: 'T', activity: 'worker' });
@@ -120,7 +134,7 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 		const sessions = new FakeSessions();
 		sessions.quickChatAvailable = true; // no servable folder, but a quick-chat target exists
 		sessions.createResult = fakeSession('agent-host-session://quick-1');
-		const launcher = make(sessions, undefined, []);
+		const { launcher } = make(sessions, undefined, []);
 
 		assert.strictEqual(launcher.canLaunch(), true);
 		const session = await launcher.launch('hi', { title: 'T', activity: 'worker', metadata: { a: 2 } });
@@ -133,7 +147,7 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 
 	test('returns undefined (no launch) when neither a folder nor a quick chat can host a session', async () => {
 		const sessions = new FakeSessions();
-		const launcher = make(sessions, URI.file('/repo'), [URI.file('/recent')]); // nothing servable, no quick chat
+		const { launcher } = make(sessions, URI.file('/repo'), [URI.file('/recent')]); // nothing servable, no quick chat
 
 		assert.strictEqual(launcher.canLaunch(), false);
 		const session = await launcher.launch('hi', { title: 'T', activity: 'worker' });
@@ -146,7 +160,7 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 		const sessions = new FakeSessions();
 		const ref = 'agent-host-session://worker-1';
 		sessions.sessionsByRef.set(ref, fakeSession(ref));
-		const launcher = make(sessions, undefined, []);
+		const { launcher } = make(sessions, undefined, []);
 
 		assert.strictEqual(await launcher.relay(ref, 'steer message'), true);
 		assert.deepStrictEqual(sessions.relayed, [{ ref, query: 'steer message' }]);

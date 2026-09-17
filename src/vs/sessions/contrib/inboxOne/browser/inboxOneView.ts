@@ -268,7 +268,7 @@ export class InboxOneView extends AbstractCustomView {
 
 	/** The reference-into-Diffy continuation (design 3.6, 2.4): steer/reopen -> relay the
 	 * user's instruction into the warm worker session and re-open the task (same session). */
-	private async continueTask(task: ILogicalTask, intent: 'steer' | 'reopen', message: string): Promise<void> {
+	private async continueTask(task: ILogicalTask, intent: 'steer' | 'reopen' | 'unblock', message: string): Promise<void> {
 		const continuationKey = `${task.id}:${intent}:${Date.now()}`;
 		const trigger = intent === 'reopen' ? TaskTrigger.Reopen : TaskTrigger.Steer;
 		// Record the user's steering/correction verbatim as a gesture, so the full
@@ -291,7 +291,9 @@ export class InboxOneView extends AbstractCustomView {
 				? localize('inboxOne.continuedNoWorker', 'Diffy re-opened this - now Cooking. (No live worker session to relay into; it will re-dispatch.)')
 				: intent === 'reopen'
 					? localize('inboxOne.reopened', 'Diffy reopened this and sent the worker your note - now Cooking.')
-					: localize('inboxOne.steered', 'Diffy sent your steer to the worker - now Cooking.'));
+					: intent === 'unblock'
+						? localize('inboxOne.unblockRelayed', "Diffy relayed your go-ahead - the worker is picking up where it paused (now Cooking).")
+						: localize('inboxOne.steered', 'Diffy sent your steer to the worker - now Cooking.'));
 		} else {
 			this.notificationService.warn(localize('inboxOne.continueFailed', 'Could not continue this task from its current state.'));
 		}
@@ -649,7 +651,11 @@ export class InboxOneView extends AbstractCustomView {
 		need.appendChild($('span', undefined, task.recoveryStep ?? localize('inboxOne.blockedGeneric', 'a human-only fact or permission to continue.')));
 
 		const actions = detail.appendChild($('.inbox-one-detail-actions'));
-		const supply = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${localize('inboxOne.provideAndRetry', "I've unblocked this")} \u25b8`));
+		const approval = this.isApprovalBlock(task);
+		const supplyLabel = approval
+			? localize('inboxOne.approveAndContinue', 'Approve')
+			: localize('inboxOne.provideAndRetry', "I've unblocked this");
+		const supply = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${supplyLabel} \u25b8`));
 		this._register(addClick(supply, () => this.recoverySupplied(task)));
 		const steer = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.steer', 'Steer')));
 		this._register(addClick(steer, () => this.steer(task)));
@@ -659,12 +665,26 @@ export class InboxOneView extends AbstractCustomView {
 		this.renderInlineComposer(detail, task);
 	}
 
-	/** Human supplied the blocker's fact/permission: retry (Blocked -> Cooking). */
-	private async recoverySupplied(task: ILogicalTask): Promise<void> {
-		const res = await this.store.transition(task.id, TaskTrigger.RecoverySupplied);
-		if (res.task) {
-			this.notificationService.info(localize('inboxOne.unblocked', "Thanks - I'll retry now with that unblocked."));
+	/** A block is an approval/go-ahead ask (vs a conversation reply or an external fact)
+	 * when the worker paused awaiting the human's OK - i.e. the generic needs-input pause
+	 * or a step that reads as a permission/approval request. Those get a one-tap "Approve". */
+	private isApprovalBlock(task: ILogicalTask): boolean {
+		const step = (task.recoveryStep ?? '').toLowerCase().trim();
+		if (step.length === 0) {
+			return true;
 		}
+		if (step.includes('worker needs input')) {
+			return true;
+		}
+		return /\b(approv|permission|authoriz|go[- ]?ahead|grant|proceed|merge|create the pr|open the pr)\b/.test(step);
+	}
+
+	/** Human resolved the blocker (approval/fact/permission): relay the go-ahead into the
+	 * SAME worker session and resume it so the worker executes the pending action itself -
+	 * never spin up a fresh attempt from scratch. */
+	private async recoverySupplied(task: ILogicalTask): Promise<void> {
+		await this.continueTask(task, 'unblock', localize('inboxOne.unblockRelay',
+			"I've resolved what you needed - you're unblocked and approved to proceed. Continue from where you paused and carry the task through to completion, including any create-PR or merge action you were about to take."));
 	}
 
 	/** Opens the live worker session backing the current attempt (wireframes 6: [ Open ]). */

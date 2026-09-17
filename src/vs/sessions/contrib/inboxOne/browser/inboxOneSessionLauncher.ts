@@ -4,11 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { URI } from '../../../../base/common/uri.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { ChatPermissionLevel } from '../../../../workbench/contrib/chat/common/constants.js';
+import { IChatSessionsService } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ISession } from '../../../services/sessions/common/session.js';
 import { ICreateNewSessionOptions, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsRecentWorkspacesService } from '../../../services/sessions/browser/sessionsRecentWorkspacesService.js';
@@ -90,6 +92,7 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 		@ISessionsRecentWorkspacesService private readonly recentWorkspaces: ISessionsRecentWorkspacesService,
 		@IWorkspaceContextService private readonly workspaceContext: IWorkspaceContextService,
 		@IStorageService private readonly storageService: IStorageService,
+		@IChatSessionsService private readonly chatSessions: IChatSessionsService,
 		@ILogService private readonly logService: ILogService,
 	) {
 		this.managed = new Set(this.loadManaged());
@@ -163,6 +166,12 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 				return undefined;
 			}
 			if (session) {
+				// Keep the same live chat-session object that owns this background
+				// turn registered with the standard chat-session harness. When the
+				// turn finishes, getChatSessionHistory then reads its completed
+				// response (including `inbox-one-result`) instead of resolving a
+				// second provider snapshot that can still have history=[].
+				await this.chatSessions.getOrCreateChatSession(session.resource, CancellationToken.None);
 				this.rememberManaged(session.resource.toString());
 				this.logService.info(`[inboxOne] launched ${options.activity} -> ${session.resource.toString()}`);
 			}
