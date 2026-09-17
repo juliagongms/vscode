@@ -538,7 +538,8 @@ export class InboxOneView extends AbstractCustomView {
 			this.renderReview(body, pack.claims);
 		}
 
-		// Decision controls, next to the recommendation.
+		// Decision controls, next to the recommendation. Exactly one steer-type control
+		// per item: "Request changes" when there is an action to change, else "Steer".
 		const footer = panel.appendChild($('.inbox-one-decision-footer'));
 		if (action) {
 			footer.appendChild($('span.inbox-one-decision-reversibility', undefined, buildConfirmation(action.actionType, action.payload as IActionPayloads[typeof action.actionType]).reversibilityLine));
@@ -546,12 +547,14 @@ export class InboxOneView extends AbstractCustomView {
 		footer.appendChild($('span.inbox-one-decision-spacer'));
 		const notNow = footer.appendChild($('button.inbox-one-action.inbox-one-action-quiet', undefined, localize('inboxOne.notNow', 'Not now')));
 		this._register(addClick(notNow, () => this.dismiss(task)));
-		const requestChanges = footer.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.requestChanges', 'Request changes')));
-		this._register(addClick(requestChanges, () => this.steer(task)));
 		if (action) {
+			const requestChanges = footer.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.requestChanges', 'Request changes')));
+			this._register(addClick(requestChanges, () => this.steer(task)));
 			const approve = footer.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, action.label));
 			this._register(addClick(approve, () => void this.confirmAndAccept(task)));
-		} else if (pack?.customAsk) {
+		} else {
+			// No typed action (the worker asked for direction, e.g. its result did not
+			// parse, or a plain FYI): a single primary that steers. No duplicate control.
 			const steerPrimary = footer.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.steer', 'Steer')));
 			this._register(addClick(steerPrimary, () => this.steer(task)));
 		}
@@ -648,8 +651,8 @@ export class InboxOneView extends AbstractCustomView {
 		const actions = detail.appendChild($('.inbox-one-detail-actions'));
 		const supply = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${localize('inboxOne.provideAndRetry', "I've unblocked this")} \u25b8`));
 		this._register(addClick(supply, () => this.recoverySupplied(task)));
-		const requestChanges = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.requestChanges', 'Request changes')));
-		this._register(addClick(requestChanges, () => this.steer(task)));
+		const steer = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.steer', 'Steer')));
+		this._register(addClick(steer, () => this.steer(task)));
 		const notNow = actions.appendChild($('button.inbox-one-action.inbox-one-action-quiet', undefined, localize('inboxOne.notNow', 'Not now')));
 		this._register(addClick(notNow, () => this.dismiss(task)));
 
