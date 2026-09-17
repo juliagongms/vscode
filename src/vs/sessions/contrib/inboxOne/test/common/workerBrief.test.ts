@@ -33,6 +33,7 @@ suite('Inbox One - workerBrief', () => {
 		// Point 1: the finite value sets / payload schemas are supplied so the worker fills actions correctly.
 		assert.ok(/## Action catalog/.test(brief), 'has an action catalog section');
 		assert.ok(brief.includes('merge_pr') && brief.includes('"merge" | "squash" | "rebase"'), 'lists action payloads incl. the strategy enum');
+		assert.ok(brief.includes('create_pr') && brief.includes('autoMerge'), 'lists the create_pr + auto-merge happy-path action');
 		// Point 3: title is a dedicated, self-contained field, not a prefix of decisionSentence.
 		assert.ok(/`title`.*self-contained/s.test(brief), 'asks for a dedicated self-contained title');
 	});
@@ -81,8 +82,13 @@ suite('Inbox One - workerBrief', () => {
 		assert.ok(!message.includes('skill:'), 'no persona section');
 	});
 
-	test('the operating envelope forbids GitHub mutations and demands autonomy', () => {
-		assert.ok(/never mutate GitHub/i.test(WORKER_OPERATING_ENVELOPE));
+	test('the operating envelope gates GitHub writes through typed actions and demands autonomy', () => {
+		// The worker may push a work branch, but must not open/merge PRs itself --
+		// it surfaces a typed action (e.g. create_pr) and the host performs the write.
+		assert.ok(/push a NEW work branch/i.test(WORKER_OPERATING_ENVELOPE), 'may push a work branch for a PR');
+		assert.ok(/do NOT open, merge, edit, or review pull requests yourself/i.test(WORKER_OPERATING_ENVELOPE), 'must not open/merge PRs itself');
+		assert.ok(/create_pr/.test(WORKER_OPERATING_ENVELOPE), 'names the create_pr happy-path action');
+		assert.ok(/only after explicit confirmation/i.test(WORKER_OPERATING_ENVELOPE), 'host performs the write after confirmation');
 		assert.ok(/fully autonomously/i.test(WORKER_OPERATING_ENVELOPE));
 		assert.ok(/emit-result/i.test(WORKER_OPERATING_ENVELOPE));
 		assert.ok(/`gh` CLI/.test(WORKER_OPERATING_ENVELOPE), 'mandates the gh CLI for GitHub reads');

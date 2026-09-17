@@ -83,6 +83,7 @@ export const enum GestureKind {
 export const enum ActionType {
 	MergePr = 'merge_pr',
 	ApprovePr = 'approve_pr',
+	CreatePr = 'create_pr',
 	Comment = 'comment',
 	AddLabels = 'add_labels',
 	CreateIssues = 'create_issues',

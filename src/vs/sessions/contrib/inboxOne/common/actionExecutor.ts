@@ -39,6 +39,7 @@ export interface IActionExecutor {
 export interface IGitHubWriteClient {
 	mergePr(payload: IActionPayloads[ActionType.MergePr]): Promise<IExternalEffect>;
 	approvePr(payload: IActionPayloads[ActionType.ApprovePr]): Promise<IExternalEffect>;
+	createPr(payload: IActionPayloads[ActionType.CreatePr]): Promise<IExternalEffect>;
 	comment(payload: IActionPayloads[ActionType.Comment]): Promise<IExternalEffect>;
 	addLabels(payload: IActionPayloads[ActionType.AddLabels]): Promise<IExternalEffect>;
 	createIssues(payload: IActionPayloads[ActionType.CreateIssues]): Promise<IExternalEffect>;

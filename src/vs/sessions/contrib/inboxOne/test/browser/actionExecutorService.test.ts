@@ -24,6 +24,7 @@ class FakeGitHubClient implements IGitHubWriteClient {
 	}
 	mergePr(_p: IActionPayloads[ActionType.MergePr]): Promise<IExternalEffect> { return this.record(ActionType.MergePr); }
 	approvePr(_p: IActionPayloads[ActionType.ApprovePr]): Promise<IExternalEffect> { return this.record(ActionType.ApprovePr); }
+	createPr(_p: IActionPayloads[ActionType.CreatePr]): Promise<IExternalEffect> { return this.record(ActionType.CreatePr); }
 	comment(_p: IActionPayloads[ActionType.Comment]): Promise<IExternalEffect> { return this.record(ActionType.Comment); }
 	addLabels(_p: IActionPayloads[ActionType.AddLabels]): Promise<IExternalEffect> { return this.record(ActionType.AddLabels); }
 	createIssues(_p: IActionPayloads[ActionType.CreateIssues]): Promise<IExternalEffect> { return this.record(ActionType.CreateIssues); }

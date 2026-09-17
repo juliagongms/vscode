@@ -91,6 +91,7 @@ export class ActionExecutorService implements IActionExecutor {
 		switch (actionType) {
 			case ActionType.MergePr: return this.client.mergePr(payload as IActionPayloads[ActionType.MergePr]);
 			case ActionType.ApprovePr: return this.client.approvePr(payload as IActionPayloads[ActionType.ApprovePr]);
+			case ActionType.CreatePr: return this.client.createPr(payload as IActionPayloads[ActionType.CreatePr]);
 			case ActionType.Comment: return this.client.comment(payload as IActionPayloads[ActionType.Comment]);
 			case ActionType.AddLabels: return this.client.addLabels(payload as IActionPayloads[ActionType.AddLabels]);
 			case ActionType.CreateIssues: return this.client.createIssues(payload as IActionPayloads[ActionType.CreateIssues]);

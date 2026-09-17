@@ -33,6 +33,26 @@ export interface IApprovePrPayload {
 	readonly body?: string;
 }
 
+/**
+ * Open a pull request from a work branch the worker already pushed, optionally
+ * enabling auto-merge so it lands automatically once required checks pass. This
+ * is the "implement a fix -> open PR -> (auto-)merge" happy path for an issue or
+ * a CI fix.
+ */
+export interface ICreatePrPayload {
+	readonly repo: string;
+	/** The branch the change is on (already pushed by the worker). */
+	readonly head: string;
+	/** The branch to merge into (e.g. the default branch). */
+	readonly base: string;
+	readonly title: string;
+	readonly body?: string;
+	/** When true, enable auto-merge so the PR lands once required checks pass. */
+	readonly autoMerge?: boolean;
+	/** Merge strategy for the (auto-)merge; defaults to squash. */
+	readonly strategy?: 'merge' | 'squash' | 'rebase';
+}
+
 export interface ICommentPayload {
 	readonly repo: string;
 	/** PR or issue number the comment targets. */
@@ -75,6 +95,7 @@ export interface IGrantScopePayload {
 export interface IActionPayloads {
 	readonly [ActionType.MergePr]: IMergePrPayload;
 	readonly [ActionType.ApprovePr]: IApprovePrPayload;
+	readonly [ActionType.CreatePr]: ICreatePrPayload;
 	readonly [ActionType.Comment]: ICommentPayload;
 	readonly [ActionType.AddLabels]: IAddLabelsPayload;
 	readonly [ActionType.CreateIssues]: ICreateIssuesPayload;
@@ -120,6 +141,12 @@ function reqStringArray(o: Record<string, unknown>, k: string, errs: string[], m
 		errs.push(`${k} must be an array of >= ${minLen} non-empty strings`);
 	}
 }
+function optEnum(o: Record<string, unknown>, k: string, allowed: readonly string[], errs: string[]): void {
+	if (o[k] !== undefined && (typeof o[k] !== 'string' || !allowed.includes(o[k] as string))) { errs.push(`${k}, when set, must be one of ${allowed.join(', ')}`); }
+}
+function optBool(o: Record<string, unknown>, k: string, errs: string[]): void {
+	if (o[k] !== undefined && typeof o[k] !== 'boolean') { errs.push(`${k}, when set, must be a boolean`); }
+}
 
 export const ACTION_CATALOG: { readonly [K in ActionType]: IActionCatalogEntry } = {
 	[ActionType.MergePr]: {
@@ -129,6 +156,10 @@ export const ACTION_CATALOG: { readonly [K in ActionType]: IActionCatalogEntry }
 	[ActionType.ApprovePr]: {
 		actionType: ActionType.ApprovePr, reversibility: Reversibility.Reversible, writesRepo: true, autoHandleEligible: false,
 		validate(p) { const e: string[] = []; if (!isObj(p)) { return ['payload must be an object']; } reqString(p, 'repo', e); reqNumber(p, 'prNumber', e); return e; },
+	},
+	[ActionType.CreatePr]: {
+		actionType: ActionType.CreatePr, reversibility: Reversibility.Reversible, writesRepo: true, autoHandleEligible: false,
+		validate(p) { const e: string[] = []; if (!isObj(p)) { return ['payload must be an object']; } reqString(p, 'repo', e); reqString(p, 'head', e); reqString(p, 'base', e); reqString(p, 'title', e); optBool(p, 'autoMerge', e); optEnum(p, 'strategy', ['merge', 'squash', 'rebase'], e); return e; },
 	},
 	[ActionType.Comment]: {
 		actionType: ActionType.Comment, reversibility: Reversibility.Reversible, writesRepo: true, autoHandleEligible: true,
@@ -201,6 +232,7 @@ export function catalogEntry(actionType: ActionType): IActionCatalogEntry {
 const ACTION_PAYLOAD_SPECS: { readonly [K in ActionType]: string } = {
 	[ActionType.MergePr]: 'repo: string, prNumber: number, base: string (target branch), strategy: "merge" | "squash" | "rebase", rerunChecks?: boolean',
 	[ActionType.ApprovePr]: 'repo: string, prNumber: number, body?: string',
+	[ActionType.CreatePr]: 'repo: string, head: string (the work branch you already pushed), base: string (branch to merge into), title: string, body?: string, autoMerge?: boolean (land automatically once checks pass), strategy?: "merge" | "squash" | "rebase"',
 	[ActionType.Comment]: 'repo: string, targetNumber: number (the PR or issue number), body: string',
 	[ActionType.AddLabels]: 'repo: string, targetNumber: number (the PR or issue number), add: string[] (>= 1 label name), remove?: string[]',
 	[ActionType.CreateIssues]: 'repo: string, issues: array (>= 1) of { title: string (required), body?: string, sourceIssues?: number[] }',

@@ -30,6 +30,7 @@ function reversibilityLine(actionType: ActionType): { line: string; reversibilit
 	switch (actionType) {
 		case ActionType.MergePr: return { line: 'Reversible - one-click revert PR', reversibility };
 		case ActionType.ApprovePr: return { line: 'Reversible - dismiss review', reversibility };
+		case ActionType.CreatePr: return { line: 'Reversible - close the PR (and revert if it lands)', reversibility };
 		case ActionType.Comment: return { line: 'Reversible - editable/deletable', reversibility };
 		case ActionType.AddLabels: return { line: 'Reversible - labels removable', reversibility };
 		case ActionType.CreateIssues: return { line: 'Reversible - issues closeable', reversibility };
@@ -66,6 +67,12 @@ function effectLinesFor<T extends ActionType>(actionType: T, payload: IActionPay
 		case ActionType.ApprovePr: {
 			const p = payload as IActionPayloads[ActionType.ApprovePr];
 			return [`approve PR #${p.prNumber} - this does not merge`];
+		}
+		case ActionType.CreatePr: {
+			const p = payload as IActionPayloads[ActionType.CreatePr];
+			const lines = [`open a pull request from ${p.head} into ${p.base}: "${p.title}"`];
+			if (p.autoMerge) { lines.push(`enable auto-merge (${p.strategy ?? 'squash'}) so it lands once required checks pass`); }
+			return lines;
 		}
 		case ActionType.Comment: {
 			const p = payload as IActionPayloads[ActionType.Comment];

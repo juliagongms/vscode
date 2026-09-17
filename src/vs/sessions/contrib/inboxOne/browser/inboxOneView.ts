@@ -848,6 +848,9 @@ export class InboxOneView extends AbstractCustomView {
 		switch (actionType) {
 			case ActionType.ApprovePr: return localize('inboxOne.conseqApprove', 'Approves PR #{0}', num('prNumber') ?? '?');
 			case ActionType.MergePr: return localize('inboxOne.conseqMerge', 'Merges PR #{0}', num('prNumber') ?? '?');
+			case ActionType.CreatePr: return p.autoMerge === true
+				? localize('inboxOne.conseqCreatePrAuto', 'Opens a PR and auto-merges')
+				: localize('inboxOne.conseqCreatePr', 'Opens a pull request');
 			case ActionType.CreateIssues: {
 				const n = arrLen('issues');
 				return n === 1 ? localize('inboxOne.conseqIssue1', 'Creates 1 issue') : localize('inboxOne.conseqIssueN', 'Creates {0} issues', n);
