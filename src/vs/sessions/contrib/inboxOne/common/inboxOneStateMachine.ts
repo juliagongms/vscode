@@ -55,6 +55,8 @@ export const enum TaskTrigger {
 	Dismiss = 'dismiss',
 	/** A human-only blocker was resolved. */
 	RecoverySupplied = 'recovery_supplied',
+	/** The worker itself resumed after a needs-input pause (human answered in the session). Same attempt. */
+	WorkerResumed = 'worker_resumed',
 	/** User retried a failed-attempt decision. */
 	Retry = 'retry',
 	/** User reopened a completed task to extend it. */
@@ -96,6 +98,7 @@ const TRANSITIONS: TransitionMap = {
 	},
 	[LogicalTaskState.Blocked]: {
 		[TaskTrigger.RecoverySupplied]: T(LogicalTaskState.Cooking, true),
+		[TaskTrigger.WorkerResumed]: T(LogicalTaskState.Cooking),
 		[TaskTrigger.Steer]: T(LogicalTaskState.Cooking, true),
 		[TaskTrigger.Dismiss]: T(LogicalTaskState.Archived),
 	},

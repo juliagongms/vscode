@@ -178,6 +178,15 @@ export class CoordinatorEngine {
 				await this.landUnfinished(task);
 				break;
 			case 'progress':
+				// The worker resumed to In Progress. If it was Blocked awaiting a
+				// human answer, the human just answered IN the session, so auto-return
+				// the item to Cooking (same attempt/session) -- no manual "I've
+				// unblocked this" needed.
+				if (task.state === LogicalTaskState.Blocked) {
+					await this.store.transition(task.id, TaskTrigger.WorkerResumed);
+					this.logService.info(`[inboxOne] task ${task.id} auto-resumed from Blocked (worker back in progress)`);
+				}
+				break;
 			case 'idle':
 			default:
 				// Non-dispatching; updates the Cooking view only (G15).

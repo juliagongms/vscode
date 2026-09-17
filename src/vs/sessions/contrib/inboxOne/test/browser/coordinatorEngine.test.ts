@@ -254,6 +254,24 @@ suite('Inbox One - coordinator engine', () => {
 		assert.strictEqual(dispatcher.relays.length, 0, 'needs_input is a human ask, not a finalize trigger');
 	});
 
+	test('a blocked task auto-resumes to Cooking when its worker goes back in progress (no manual unblock)', async () => {
+		const { store, engine } = build();
+		await engine.handleEvent(prEvent());
+		const task = store.tasks.get()[0];
+		const sessionId = task.attempts[0].sessionRef!.replace('session://worker/', '');
+		await engine.handleEvent({ deliveryId: 'se1', source: EventSource.Session, sessionId, type: 'needs_input', subject: { kind: 'session', id: sessionId }, receivedAt: 0 });
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Blocked);
+		const attemptsBefore = store.getTask(task.id)!.attempts.length;
+
+		// The human answered the ask IN the session, so the worker resumes to In Progress.
+		await engine.handleEvent({ deliveryId: 'se2', source: EventSource.Session, sessionId, type: 'progress', subject: { kind: 'session', id: sessionId }, receivedAt: 0 });
+
+		const after = store.getTask(task.id)!;
+		assert.strictEqual(after.state, LogicalTaskState.Cooking, 'auto-returned to Cooking');
+		assert.strictEqual(after.attempts.length, attemptsBefore, 'same attempt -- no new dispatch');
+		assert.strictEqual(after.attempts[after.currentAttempt].sessionRef, `session://worker/${sessionId}`, 'keeps the same live worker session');
+	});
+
 	test('a task_finished with no result asks the worker to finalize once, then fails', async () => {
 		const { store, dispatcher, engine } = build();
 		await engine.handleEvent(prEvent());
