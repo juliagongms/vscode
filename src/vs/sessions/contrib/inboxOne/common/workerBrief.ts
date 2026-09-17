@@ -3,9 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { describeActionCatalog } from './actionCatalog.js';
+import { describeActionCatalog, IActionPayloads } from './actionCatalog.js';
+import { buildConfirmation } from './actionConfirmation.js';
 import { WorkerRole } from './eventTaxonomy.js';
-import { ILogicalTask } from './inboxOneTypes.js';
+import { ILogicalTask, IPrimaryAction } from './inboxOneTypes.js';
 
 /**
  * Coordinator -> worker handoff (technical spec 2.2 step 4, 2.3).
@@ -74,6 +75,31 @@ export function composeSteerRelay(instruction: string): string {
 		instruction.trim(),
 		'',
 		'After addressing this, re-run the emit-result contract and END your reply with a single fresh `inbox-one-result` block reflecting your UPDATED decision (title, decisionSentence, claims with receipts, gapLine, and a typed action or customAsk per the contract). Always emit a new block -- even if your conclusion is unchanged -- so the inbox card updates with the new result.',
+	].join('\n');
+}
+
+/**
+ * Composes the host-authored instruction to CARRY OUT an approved typed action in
+ * the warm worker session (design 7.3, technical spec 7). The renderer is
+ * sandboxed and there is no host-side GitHub write client, so the authenticated
+ * worker session is the harness's execution arm: once the human confirms, Diffy
+ * relays the exact typed action plus the host-generated effect lines (never model
+ * free-text) into the SAME session, and the worker performs the write with its
+ * `gh`/`git` tools. The action name and every effect line come from the validated
+ * catalog via {@link buildConfirmation}, so the last gate before a real
+ * merge/create/comment carries no model free-text. The coordinator then resolves
+ * the task's Confirming state from the worker's lifecycle (finish = done).
+ */
+export function composeActionExecutionRelay(action: IPrimaryAction): string {
+	const confirmation = buildConfirmation(action.actionType, action.payload as IActionPayloads[typeof action.actionType]);
+	return [
+		'The human reviewed your recommendation and APPROVED this exact action. Carry it out NOW using your GitHub tools (the `gh` CLI and `git`). This explicit human confirmation overrides the usual "surface a typed action, do not write" rule -- but ONLY for exactly this action.',
+		'',
+		`Approved action: ${action.actionType}`,
+		'This must:',
+		...confirmation.effectLines.map(line => `- ${line}`),
+		'',
+		'Perform exactly this action and nothing else. Make it idempotent: if it was already applied, verify the end state and report success instead of erroring. When finished, briefly confirm what you did and include the resulting receipt link (the merged PR, opened PR, created issue, posted comment, etc.), then END your turn. If you genuinely cannot complete it, do not retry endlessly -- explain the blocker and end your turn.',
 	].join('\n');
 }
 

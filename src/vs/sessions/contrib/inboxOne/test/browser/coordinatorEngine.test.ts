@@ -382,6 +382,60 @@ suite('Inbox One - coordinator engine', () => {
 		assert.strictEqual(reader.reads.length, 1, 'the worker result was read once');
 	});
 
+	test('accepting a decision moves it to Confirming; the worker finishing carries out the action (-> Completed)', async () => {
+		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
+		const reader = new FakeResultReader();
+		reader.output = validOutput();
+		const engine = new CoordinatorEngine('my', store, new FakeSettings([{ repo: 'acme/api', active: true }]), new FakeAdmission(), new FakeDispatcher(), new NullLogService(), undefined, reader);
+
+		await engine.handleEvent(prEvent());
+		const task = store.tasks.get()[0];
+		const sessionId = task.attempts[0].sessionRef!.replace('session://worker/', '');
+		const sessionEvt = (type: 'task_finished' | 'failed' | 'needs_input' | 'progress', deliveryId: string): IIngressEvent =>
+			({ deliveryId, source: EventSource.Session, sessionId, type, subject: { kind: 'session', id: sessionId }, receivedAt: 0 });
+
+		// Land the decision, then the human approves it (Decision -> Confirming).
+		await engine.handleEvent(sessionEvt('task_finished', 'tf1'));
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Decision);
+		await store.transition(task.id, TaskTrigger.Accept);
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Confirming);
+		const readsBefore = reader.reads.length;
+
+		// A progress event while executing keeps it Confirming (still carrying out the action).
+		await engine.handleEvent(sessionEvt('progress', 'pr1'));
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Confirming);
+
+		// The worker carried out the action and finished: the confirmation resolves to
+		// Completed WITHOUT re-reading a result or landing a second Decision.
+		await engine.handleEvent(sessionEvt('task_finished', 'tf2'));
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Completed);
+		assert.strictEqual(reader.reads.length, readsBefore, 'a Confirming finish does not re-read/re-land a Decision');
+	});
+
+	test('a worker that cannot carry out an approved action returns the item to a Decision', async () => {
+		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
+		const reader = new FakeResultReader();
+		reader.output = validOutput();
+		const engine = new CoordinatorEngine('my', store, new FakeSettings([{ repo: 'acme/api', active: true }]), new FakeAdmission(), new FakeDispatcher(), new NullLogService(), undefined, reader);
+
+		await engine.handleEvent(prEvent());
+		const task = store.tasks.get()[0];
+		const sessionId = task.attempts[0].sessionRef!.replace('session://worker/', '');
+		const sessionEvt = (type: 'task_finished' | 'failed', deliveryId: string): IIngressEvent =>
+			({ deliveryId, source: EventSource.Session, sessionId, type, subject: { kind: 'session', id: sessionId }, receivedAt: 0 });
+
+		await engine.handleEvent(sessionEvt('task_finished', 'tf1'));
+		await store.transition(task.id, TaskTrigger.Accept);
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Confirming);
+
+		// A hard failure while carrying out the action returns it to a Decision the
+		// human can retry, preserving the proposed action.
+		await engine.handleEvent(sessionEvt('failed', 'f1'));
+		const back = store.getTask(task.id)!;
+		assert.strictEqual(back.state, LogicalTaskState.Decision);
+		assert.ok(back.evidence!.primaryAction, 'the proposed action is preserved for retry');
+	});
+
 	test('an invalid worker result, after a finalize retry, lands a coherent needs-direction decision', async () => {
 		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
 		const reader = new FakeResultReader();

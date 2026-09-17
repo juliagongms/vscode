@@ -6,8 +6,8 @@
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { WorkerRole } from '../../common/eventTaxonomy.js';
-import { EventSource, ILogicalTask, LogicalTaskState } from '../../common/inboxOneTypes.js';
-import { buildWorkerBrief, composeSteerRelay, composeWorkerFirstMessage, WORKER_OPERATING_ENVELOPE } from '../../common/workerBrief.js';
+import { EventSource, ILogicalTask, LogicalTaskState, ActionType } from '../../common/inboxOneTypes.js';
+import { buildWorkerBrief, composeActionExecutionRelay, composeSteerRelay, composeWorkerFirstMessage, WORKER_OPERATING_ENVELOPE } from '../../common/workerBrief.js';
 
 function task(overrides: Partial<ILogicalTask> = {}): ILogicalTask {
 	return {
@@ -100,5 +100,16 @@ suite('Inbox One - workerBrief', () => {
 		assert.ok(relay.includes('also consider the mobile Safari case'), 'includes the human instruction (trimmed)');
 		assert.ok(relay.includes('inbox-one-result'), 'asks for a fresh emit-result block');
 		assert.ok(/fresh|new block/i.test(relay), 'insists on a new block so the card updates');
+	});
+
+	test('composeActionExecutionRelay is host-authored from the catalog and names the exact action', () => {
+		// The button label is worker free-text; the executed instruction must come
+		// from the validated catalog (the host confirmation effect lines), never the label.
+		const relay = composeActionExecutionRelay({ label: 'Ship it', actionType: ActionType.MergePr, payload: { repo: 'acme/api', prNumber: 842, base: 'main', strategy: 'squash' } });
+		assert.ok(/APPROVED/.test(relay), 'states the human approved the action');
+		assert.ok(relay.includes('merge_pr'), 'names the exact catalog action_type');
+		assert.ok(relay.includes('merge PR #842 into main (squash)'), 'carries the host-generated effect line, not the worker label');
+		assert.ok(!relay.includes('Ship it'), 'does not put the worker free-text label into the execution instruction');
+		assert.ok(/idempotent/i.test(relay), 'requires the write to be idempotent');
 	});
 });

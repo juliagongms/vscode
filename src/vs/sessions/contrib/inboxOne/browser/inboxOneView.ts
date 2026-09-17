@@ -16,11 +16,11 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../platfo
 import { AbstractCustomView } from '../../../services/customView/browser/customView.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { buildConfirmation } from '../common/actionConfirmation.js';
-import { IActionPayloads } from '../common/actionCatalog.js';
+import { ACTION_CATALOG, IActionPayloads } from '../common/actionCatalog.js';
 import { IInboxOneStore, TransitionOutcome } from '../common/inboxOneStore.js';
 import { TaskTrigger } from '../common/inboxOneStateMachine.js';
 import { ActionType, GestureKind, IEvidenceClaim, ILogicalTask, InboxOneTier, IPrimaryAction, LogicalTaskState } from '../common/inboxOneTypes.js';
-import { composeSteerRelay } from '../common/workerBrief.js';
+import { composeActionExecutionRelay, composeSteerRelay } from '../common/workerBrief.js';
 import { IInboxOneSessionLauncher } from './inboxOneSessionLauncher.js';
 import { IInboxOneNavigator } from './inboxOneNavigator.js';
 
@@ -772,13 +772,46 @@ export class InboxOneView extends AbstractCustomView {
 	private async accept(task: ILogicalTask): Promise<void> {
 		const attemptIndex = task.attempts[task.currentAttempt]?.index ?? 0;
 		const revision = task.evidence?.revision;
+		const action = task.evidence?.primaryAction;
+		// Guard the accept on exactly the evidence revision we confirmed, so a card
+		// that changed under us is not accepted on stale evidence (I6). This moves
+		// the task Decision -> Confirming.
 		const res = await this.store.transition(task.id, TaskTrigger.Accept, undefined, { expected: { attemptIndex, evidenceRevision: revision } });
-		if (res.task) {
-			await this.store.transition(task.id, TaskTrigger.ConfirmSucceeded);
-			this.notificationService.info(localize('inboxOne.accepted', 'Accepted: {0}', task.evidence?.primaryAction?.label ?? task.type));
-		} else {
+		if (!res.task) {
 			this.notificationService.warn(localize('inboxOne.staleAccept', 'This decision changed - re-verify before accepting.'));
+			return;
 		}
+		// Record the approval verbatim as a positive gesture for the learning loop
+		// (design 6.4): accept is the strongest "this was right" signal.
+		void this.store.recordGesture({ taskId: task.id, kind: GestureKind.Accept, note: action ? `Approved: ${action.label}` : 'Approved', timestamp: Date.now() });
+
+		const ref = task.attempts[task.currentAttempt]?.sessionRef;
+		const relayable = !!ref && !ref.startsWith('inboxone-pending:') && !ref.startsWith('inboxone-stub:');
+		if (action && ACTION_CATALOG[action.actionType].writesRepo) {
+			// A repository-write action is actually CARRIED OUT: Diffy relays the exact,
+			// host-described action into the SAME authenticated worker session (the
+			// harness's execution arm; the sandboxed renderer has no GitHub write
+			// client). The coordinator resolves Confirming -> Completed when the worker
+			// finishes, or -> Decision if it cannot. We must not claim "done" without
+			// executing, so a missing/failed relay fails the confirmation honestly.
+			const relayed = relayable && await this.sessionLauncher.relay(ref!, composeActionExecutionRelay(action));
+			if (relayed) {
+				this.selectedTaskId.set(task.id, undefined);
+				this.notificationService.info(localize('inboxOne.carryingOut', 'Approved - Diffy is carrying out "{0}" now.', action.label));
+				return;
+			}
+			await this.store.transition(task.id, TaskTrigger.ConfirmFailed, {
+				recoveryStep: localize('inboxOne.execNoWorker', 'The worker session that produced this is no longer live to carry out the action. Retry to re-dispatch it.'),
+			});
+			this.notificationService.warn(localize('inboxOne.carryOutFailed', 'Could not carry out "{0}" - the worker session is no longer live. Retry to re-dispatch.', action.label));
+			return;
+		}
+
+		// An evidence-only decision or a non-repo-write action (dispatch_fix opens
+		// child work; grant_scope is a settings grant) has no GitHub write to
+		// perform here, so completing simply acknowledges the decision.
+		await this.store.transition(task.id, TaskTrigger.ConfirmSucceeded);
+		this.notificationService.info(localize('inboxOne.accepted', 'Accepted: {0}', action?.label ?? task.type));
 	}
 
 	private async dismiss(task: ILogicalTask): Promise<void> {

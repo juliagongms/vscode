@@ -153,6 +153,13 @@ export class CoordinatorEngine {
 			// later, but there is nothing to reactivate here.
 			return;
 		}
+		// A task that is CARRYING OUT an approved typed action (Confirming) resolves
+		// its execution from the worker's lifecycle here, rather than landing a new
+		// Decision from the worker's post-action result (G15, tech-spec 7).
+		if (task.type !== 'conversation' && task.state === LogicalTaskState.Confirming) {
+			await this.resolveConfirmation(task, event.type);
+			return;
+		}
 		switch (event.type) {
 			case 'task_finished':
 				// A conversation thread (not a dispatched worker) finishing is not an
@@ -203,6 +210,36 @@ export class CoordinatorEngine {
 			case 'idle':
 			default:
 				// Non-dispatching; updates the Cooking view only (G15).
+				break;
+		}
+	}
+
+	/**
+	 * Resolves a task that is CARRYING OUT an approved typed action (Confirming).
+	 * After the human confirmed, Diffy relayed the exact catalog action into the
+	 * worker session (the authenticated execution arm); the worker performs the
+	 * write and its lifecycle confirms the outcome. A clean finish confirms the
+	 * effect (-> Completed); a hard failure or a mid-execution ask returns it to a
+	 * Decision the human can retry or steer (-> Decision). This never lands a new
+	 * Decision from the worker's post-action result, and authors no evidence.
+	 */
+	private async resolveConfirmation(task: ILogicalTask, eventType: string): Promise<void> {
+		switch (eventType) {
+			case 'task_finished':
+				await this.store.transition(task.id, TaskTrigger.ConfirmSucceeded);
+				this.logService.info(`[inboxOne] task ${task.id} carried out its approved action (confirmed done)`);
+				break;
+			case 'failed':
+			case 'needs_input':
+				await this.store.transition(task.id, TaskTrigger.ConfirmFailed, {
+					recoveryStep: 'The worker could not complete the approved action. Retry to run it again, or steer it with more detail.',
+				});
+				this.logService.info(`[inboxOne] task ${task.id} approved action did not complete (${eventType}); returned to Decision`);
+				break;
+			case 'progress':
+			case 'idle':
+			default:
+				// Still executing the action; wait for the terminal lifecycle event.
 				break;
 		}
 	}
