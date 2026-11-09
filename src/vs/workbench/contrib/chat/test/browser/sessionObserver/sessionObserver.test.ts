@@ -8,7 +8,17 @@ import { URI } from '../../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { ChatDraftRequestService } from '../../../browser/sessionObserver/chatDraftRequestService.js';
 import { CopilotCliEventMapper, cliUserOrigin } from '../../../browser/sessionObserver/copilotCliTranscriptSource.js';
-import { IChatDraftResolution } from '../../../common/sessionObserver/chatSessionObserver.js';
+import { IChatDraftResolution, IChatInputSuggestionEvent, IChatRequestSubmission, IChatSessionObserverService } from '../../../common/sessionObserver/chatSessionObserver.js';
+import { Emitter, Event } from '../../../../../../base/common/event.js';
+import { CancellationToken } from '../../../../../../base/common/cancellation.js';
+import { Schemas } from '../../../../../../base/common/network.js';
+import { InlineCompletionEndOfLifeReasonKind, InlineCompletionTriggerKind } from '../../../../../../editor/common/languages.js';
+import { LanguageFeaturesService } from '../../../../../../editor/common/services/languageFeaturesService.js';
+import { createTextModel } from '../../../../../../editor/test/common/testTextModel.js';
+import { TestConfigurationService } from '../../../../../../platform/configuration/test/common/testConfigurationService.js';
+import { ChatInputSuggestionService } from '../../../browser/sessionObserver/chatInputSuggestionService.js';
+import { IChatWidget, IChatWidgetService } from '../../../browser/chat.js';
+import { ChatRequestQueueKind, IChatRequestAcceptedEvent, IChatService } from '../../../common/chatService/chatService.js';
 
 suite('chatSessionObserver', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -74,5 +84,54 @@ suite('chatSessionObserver', () => {
 		drafts.resolveDraft('d2', 'steered', { finalText: 'Run the full suite first', edited: true });
 		assert.deepStrictEqual(resolved.at(-1), { draft: resolved.at(-1)!.draft, outcome: 'steered', edited: true, finalText: 'Run the full suite first' });
 		assert.strictEqual(drafts.editingDraft(session), undefined);
+	});
+
+	test('input suggestions: ghost text on an empty input or a prefix, and a submission tied to the accept', async () => {
+		const session = URI.parse('copilotcli:/s1');
+		const model = store.add(createTextModel('', null, undefined, URI.from({ scheme: Schemas.vscodeChatInput, path: '/input-1' })));
+		const widget = {
+			viewModel: { sessionResource: session, model: { hasRequests: true } },
+			inputEditor: { getModel: () => model, hasTextFocus: () => false, onDidFocusEditorText: Event.None, updateOptions: () => { } },
+		} as unknown as IChatWidget;
+		const widgets = { getAllWidgets: () => [widget], onDidAddWidget: Event.None } as unknown as IChatWidgetService;
+		const accepted = store.add(new Emitter<IChatRequestAcceptedEvent>());
+		const chatService = { onDidAcceptRequest: accepted.event } as unknown as IChatService;
+		const observer = { activeSessions: [{ resource: session, host: 'chatView' }] } as unknown as IChatSessionObserverService;
+		const features = new LanguageFeaturesService();
+		const drafts = store.add(new ChatDraftRequestService());
+		const service = store.add(new ChatInputSuggestionService(features, widgets, chatService, observer, drafts, new TestConfigurationService()));
+		const states: IChatInputSuggestionEvent[] = [];
+		const submissions: IChatRequestSubmission[] = [];
+		store.add(service.onDidChangeSuggestionState(e => states.push(e)));
+		store.add(service.onDidSubmitRequest(e => submissions.push(e)));
+
+		const provider = features.inlineCompletionsProvider.all(model)[0];
+		const ctx = { triggerKind: InlineCompletionTriggerKind.Automatic, selectedSuggestionInfo: undefined, includeInlineEdits: false, includeInlineCompletions: true, requestIssuedDateTime: 0, earliestShownDateTime: 0 } as never;
+		const provide = async () => (await provider.provideInlineCompletions(model, model.getFullModelRange().getEndPosition(), ctx, CancellationToken.None))?.items[0];
+
+		assert.strictEqual(await provide(), undefined);
+		service.setSuggestion('ext', session, { id: 'r1', text: 'Run the full suite, then commit.' });
+		const item = await provide();
+		assert.strictEqual(item?.insertText, 'Run the full suite, then commit.');
+
+		// A prefix of the suggestion keeps it; other text hides it (never over what the user typed).
+		model.setValue('Run the');
+		assert.strictEqual((await provide())?.insertText, 'Run the full suite, then commit.');
+		model.setValue('Push it');
+		assert.strictEqual(await provide(), undefined);
+		assert.deepStrictEqual(states.map(s => [s.state, s.reason]), [['hidden', 'userTypedFirst']]);
+
+		model.setValue('');
+		const shown = (await provide())!;
+		provider.handleItemDidShow?.({ items: [shown] }, shown, '', undefined as never);
+		provider.handleEndOfLifetime?.({ items: [shown] }, shown, { kind: InlineCompletionEndOfLifeReasonKind.Accepted, alternativeAction: false }, undefined as never);
+		assert.deepStrictEqual(states.slice(1).map(s => s.state), ['shown', 'accepted']);
+
+		drafts.setDraft({ id: 'd1', owner: 'ext', session, text: 'Check the CHANGELOG', label: 'Suggested', createdAt: 1 });
+		drafts.stageForSubmit('d1');
+		accepted.fire({ chatSessionResource: session, isNewSession: false, text: 'Run the full suite, then commit.', queue: ChatRequestQueueKind.Steering });
+		assert.strictEqual(submissions.length, 1);
+		assert.deepStrictEqual({ kind: submissions[0].kind, from: submissions[0].fromSuggestion?.id, draft: submissions[0].fromDraft?.id }, { kind: 'steer', from: 'r1', draft: 'd1' });
+		assert.strictEqual(service.getSuggestion(session), undefined);
 	});
 });

@@ -499,7 +499,8 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		viewModel.setDraftSource(drafts);
 		const host = this.viewOptions.isSessionsWindow ? 'agentsWindow' : isIChatViewViewContext(this.viewContext) ? 'chatView' : isIChatResourceViewContext(this.viewContext) && this.viewContext.isQuickChat ? 'quickChat' : 'chatEditor';
 		const report = () => {
-			if (this._visible.get()) {
+			// A session with no turn yet (a new-session composer) shows no transcript, so no drafts.
+			if (this._visible.get() && viewModel.model.hasRequests) {
 				for (const d of drafts.getDrafts(session)) {
 					drafts.reportDraftState(d.id, 'shown', host);
 				}

@@ -5223,6 +5223,11 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	color: var(--vscode-descriptionForeground);
 }
 
+/* A pushed input suggestion (proposed API chatInputSuggestion) replaces the placeholder while it shows */
+.interactive-input-part .monaco-editor:has(.ghost-text-decoration, .ghost-text) .editorPlaceholder {
+	display: none;
+}
+
 /* Suggested drafts (proposed API chatDraftRequests): dashed, muted, never sent on their own */
 .interactive-item-container.draft-request .value {
 	border: 1px dashed var(--vscode-focusBorder);

@@ -5,7 +5,7 @@
 
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { Emitter } from '../../../../../base/common/event.js';
-import { Disposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap } from '../../../../../base/common/lifecycle.js';
 import { ResourceMap } from '../../../../../base/common/map.js';
 import { Schemas } from '../../../../../base/common/network.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -19,6 +19,8 @@ import { InlineCompletionsController } from '../../../../../editor/contrib/inlin
 import { ChatRequestQueueKind, IChatService } from '../../common/chatService/chatService.js';
 import { ActiveChatSessionHost, ChatInputSuggestionState, IChatDraftRequestService, IChatInputSuggestion, IChatInputSuggestionEvent, IChatInputSuggestionService, IChatRequestSubmission, IChatSessionObserverService } from '../../common/sessionObserver/chatSessionObserver.js';
 import { IChatWidget, IChatWidgetService } from '../chat.js';
+import { chatInputInlineCompletionsSetting } from '../widget/input/editor/chatInputInlineSuggestions.js';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 
 interface IEntry {
 	readonly owner: string;
@@ -70,6 +72,7 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		@IChatService chatService: IChatService,
 		@IChatSessionObserverService private readonly observer: IChatSessionObserverService,
 		@IChatDraftRequestService private readonly drafts: IChatDraftRequestService,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
 		super();
 		const provider: InlineCompletionsProvider<ISuggestionList> = {
@@ -83,6 +86,16 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		for (const scheme of [Schemas.vscodeChatInput, Schemas.sessionsChatInput]) {
 			this._register(languageFeaturesService.inlineCompletionsProvider.register({ scheme }, provider));
 		}
+
+		// Chat inputs keep inline suggestions off unless Copilot's chat completions are on; a
+		// pushed suggestion turns them on for the inputs bound to its session, while it lasts.
+		const bindWidget = (w: IChatWidget) => {
+			if (!this.focusListeners.has(w)) {
+				this.focusListeners.set(w, w.inputEditor.onDidFocusEditorText(() => this.showIn(w)));
+			}
+		};
+		this.chatWidgetService.getAllWidgets().forEach(bindWidget);
+		this._register(this.chatWidgetService.onDidAddWidget(bindWidget));
 
 		// Every new submission: report it, and tie it to the suggestion or draft it came from.
 		this._register(chatService.onDidAcceptRequest(e => {
@@ -108,8 +121,31 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 			if (entry) {
 				this.entries.delete(session);
 				this._onDidChangeSuggestions.fire(session);
+				this.restore(session);
 			}
 		}));
+	}
+
+	private readonly focusListeners = this._register(new DisposableMap<IChatWidget>());
+
+	/** Shows the session's suggestion in a widget's input, enabling inline suggestions there. */
+	private showIn(w: IChatWidget): void {
+		const session = w.viewModel?.sessionResource;
+		if (!session || !this.entries.has(session)) {
+			return;
+		}
+		w.inputEditor.updateOptions({ inlineSuggest: { enabled: true } });
+		InlineCompletionsController.get(w.inputEditor)?.model.get()?.trigger();
+	}
+
+	/** Restores the configured inline-suggestion setting on the inputs bound to a session. */
+	private restore(session: URI): void {
+		const enabled = this.configurationService.getValue<boolean>(chatInputInlineCompletionsSetting) === true;
+		for (const w of this.chatWidgetService.getAllWidgets()) {
+			if (w.viewModel?.sessionResource.toString() === session.toString()) {
+				w.inputEditor.updateOptions({ inlineSuggest: { enabled } });
+			}
+		}
 	}
 
 	private hostFor(session: URI): ActiveChatSessionHost {
@@ -131,10 +167,14 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 			this.entries.delete(session);
 		}
 		this._onDidChangeSuggestions.fire(session);
+		if (!suggestion) {
+			this.restore(session);
+			return;
+		}
 		// Show it at once in an input that is focused and empty (or a prefix), in every widget on the session.
 		for (const w of this.chatWidgetService.getAllWidgets()) {
 			if (w.viewModel?.sessionResource.toString() === session.toString() && w.inputEditor.hasTextFocus()) {
-				InlineCompletionsController.get(w.inputEditor)?.model.get()?.trigger();
+				this.showIn(w);
 			}
 		}
 	}
@@ -158,7 +198,8 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 	private provide(model: ITextModel, position: Position, _context: InlineCompletionContext, _token: CancellationToken): ISuggestionList | undefined {
 		const widget = this.widgetFor(model);
 		const session = widget?.viewModel?.sessionResource;
-		if (!session) {
+		// A session with no turn yet (a new-session composer) has nothing to reply to.
+		if (!session || !widget?.viewModel?.model.hasRequests) {
 			return undefined;
 		}
 		const entry = this.entries.get(session);
