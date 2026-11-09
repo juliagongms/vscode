@@ -4122,9 +4122,19 @@ export interface MainThreadChatSessionObserverShape extends IDisposable {
 	$revealChatSessionEvent(resource: UriComponents, eventId: string): Promise<void>;
 	$openChatSessionEditDiff(resource: UriComponents, eventId: string): Promise<void>;
 	$setChatInputSuggestion(resource: UriComponents, suggestion: IChatInputSuggestion | undefined): void;
+	$setChatSessionAnnotations(resource: UriComponents, annotations: IChatSessionAnnotationDto[]): void;
 	$addChatDraftRequest(resource: UriComponents, draft: { id: string; text: string; label: string; detail?: string; warning?: string }): void;
 	$updateChatDraftRequest(id: string, patch: { text?: string; label?: string; detail?: string; warning?: string }): void;
 	$disposeChatDraftRequest(id: string): void;
+}
+
+export interface IChatSessionAnnotationDto {
+	readonly id: string;
+	readonly timestamp: number;
+	readonly label: string;
+	readonly detail?: IMarkdownString;
+	readonly icon?: string;
+	readonly attention?: boolean;
 }
 
 export interface ExtHostChatSessionObserverShape {

@@ -5,9 +5,10 @@
 
 import { Disposable, DisposableMap, DisposableStore } from '../../../base/common/lifecycle.js';
 import { URI, UriComponents } from '../../../base/common/uri.js';
-import { IChatDraftRequestService, IChatInputSuggestion, IChatInputSuggestionService, IChatSessionContentRef, IChatSessionObserverService, IChatSessionTranscript } from '../../contrib/chat/common/sessionObserver/chatSessionObserver.js';
+import { IChatDraftRequestService, IChatInputSuggestion, IChatInputSuggestionService, IChatSessionAnnotationService, IChatSessionContentRef, IChatSessionObserverService, IChatSessionTranscript } from '../../contrib/chat/common/sessionObserver/chatSessionObserver.js';
+import { ThemeIcon } from '../../../base/common/themables.js';
 import { extHostNamedCustomer, IExtHostContext } from '../../services/extensions/common/extHostCustomers.js';
-import { ExtHostChatSessionObserverShape, ExtHostContext, MainContext, MainThreadChatSessionObserverShape } from '../common/extHost.protocol.js';
+import { ExtHostChatSessionObserverShape, ExtHostContext, IChatSessionAnnotationDto, MainContext, MainThreadChatSessionObserverShape } from '../common/extHost.protocol.js';
 
 /**
  * Proposed APIs `chatSessionObserver`, `chatInputSuggestion` and `chatDraftRequests`: the
@@ -29,6 +30,7 @@ export class MainThreadChatSessionObserver extends Disposable implements MainThr
 		@IChatSessionObserverService private readonly observer: IChatSessionObserverService,
 		@IChatInputSuggestionService private readonly suggestions: IChatInputSuggestionService,
 		@IChatDraftRequestService private readonly draftService: IChatDraftRequestService,
+		@IChatSessionAnnotationService private readonly annotations: IChatSessionAnnotationService,
 	) {
 		super();
 		this.proxy = extHostContext.getProxy(ExtHostContext.ExtHostChatSessionObserver);
@@ -107,6 +109,15 @@ export class MainThreadChatSessionObserver extends Disposable implements MainThr
 		this.suggestions.setSuggestion(this.owner, URI.revive(resource), suggestion);
 	}
 
+	$setChatSessionAnnotations(resource: UriComponents, annotations: IChatSessionAnnotationDto[]): void {
+		this.annotations.setAnnotations(this.owner, URI.revive(resource), annotations.map(a => ({
+			id: a.id, timestamp: a.timestamp, label: a.label,
+			...(a.detail ? { detail: a.detail } : {}),
+			...(a.icon ? { icon: ThemeIcon.fromId(a.icon) } : {}),
+			...(a.attention ? { attention: true } : {}),
+		})));
+	}
+
 	$addChatDraftRequest(resource: UriComponents, draft: { id: string; text: string; label: string; detail?: string; warning?: string }): void {
 		this.drafts.add(draft.id);
 		this.draftService.setDraft({ ...draft, owner: this.owner, session: URI.revive(resource), createdAt: Date.now() });
@@ -123,6 +134,7 @@ export class MainThreadChatSessionObserver extends Disposable implements MainThr
 	}
 
 	override dispose(): void {
+		this.annotations.clearOwner(this.owner);
 		for (const id of [...this.drafts]) {
 			this.draftService.resolveDraft(id, 'expired', { reason: 'extension_host_ended' });
 		}

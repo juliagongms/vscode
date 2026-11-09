@@ -1779,6 +1779,10 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'chatSessionObserver');
 				return extHostChatSessionObserver.openChatSessionEditDiff(resource, eventId);
 			},
+			setChatSessionAnnotations(session: vscode.Uri, annotations: readonly vscode.ChatSessionAnnotation[]) {
+				checkProposedApiEnabled(extension, 'chatSessionAnnotations');
+				return extHostChatSessionObserver.setChatSessionAnnotations(session, annotations);
+			},
 			setChatInputSuggestion(session: vscode.Uri, suggestion: vscode.ChatInputSuggestion | undefined) {
 				checkProposedApiEnabled(extension, 'chatInputSuggestion');
 				return extHostChatSessionObserver.setChatInputSuggestion(session, suggestion);
@@ -2382,6 +2386,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			ChatRequestSubmissionKind: extHostTypes.ChatRequestSubmissionKind,
 			ChatDraftRequestState: extHostTypes.ChatDraftRequestState,
 			ChatDraftRequestOutcome: extHostTypes.ChatDraftRequestOutcome,
+			ChatSessionAnnotationEmphasis: extHostTypes.ChatSessionAnnotationEmphasis,
 			ChatSessionCustomizationType: extHostTypes.ChatSessionCustomizationType,
 			ChatDebugLogLevel: extHostTypes.ChatDebugLogLevel,
 			ChatDebugToolCallResult: extHostTypes.ChatDebugToolCallResult,

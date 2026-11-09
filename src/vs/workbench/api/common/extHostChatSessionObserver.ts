@@ -11,7 +11,8 @@ import { revive } from '../../../base/common/marshalling.js';
 import { URI } from '../../../base/common/uri.js';
 import { IExtensionDescription } from '../../../platform/extensions/common/extensions.js';
 import { ExtHostChatSessionObserverShape, IMainContext, MainContext, MainThreadChatSessionObserverShape } from './extHost.protocol.js';
-import { Range } from './extHostTypes.js';
+import { ChatSessionAnnotationEmphasis, Range } from './extHostTypes.js';
+import * as typeConvert from './extHostTypeConverters.js';
 import { ExtHostWebviewViews } from './extHostWebviewView.js';
 
 // The internal model uses strings; the API uses enums whose values are the 1-based position
@@ -226,6 +227,17 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 			obs.info = toApiInfo(info);
 			obs._onDidChangeInfo.fire(obs.info);
 		}
+	}
+
+	// ---- chatSessionAnnotations ----
+
+	setChatSessionAnnotations(session: vscode.Uri, annotations: readonly vscode.ChatSessionAnnotation[]): void {
+		this.proxy.$setChatSessionAnnotations(session, annotations.map(a => ({
+			id: a.id, timestamp: a.timestamp, label: a.label,
+			...(a.detail ? { detail: typeConvert.MarkdownString.from(a.detail) } : {}),
+			...(a.icon ? { icon: a.icon.id } : {}),
+			...(a.emphasis === ChatSessionAnnotationEmphasis.Attention ? { attention: true } : {}),
+		})));
 	}
 
 	// ---- chatInputSuggestion ----

@@ -6,7 +6,9 @@
 import { addDisposableListener, EventType } from '../../../../../base/browser/dom.js';
 import { IMouseWheelEvent, StandardWheelEvent } from '../../../../../base/browser/mouseEvent.js';
 import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
-import { autorun } from '../../../../../base/common/observable.js';
+import { autorun, observableValue } from '../../../../../base/common/observable.js';
+import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
+import { IChatSessionAnnotation, IChatSessionAnnotationService } from '../../common/sessionObserver/chatSessionObserver.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IWorkbenchEnvironmentService } from '../../../../services/environment/common/environmentService.js';
@@ -16,7 +18,7 @@ import { ChatAgentLocation, ChatConfiguration } from '../../common/constants.js'
 import { MIN_RAIL_PROMPTS, PromptTimelineRailStyle, PROMPT_TIMELINE_CONTRIB_ID, PROMPT_TIMELINE_DISPLAY_SETTING, PROMPT_TIMELINE_STICKY_SCROLL_SETTING } from '../../common/promptTimeline.js';
 import { PromptTimelineModel } from './promptTimelineModel.js';
 import { PromptTimelineGutterRail } from './promptTimelineGutterRail.js';
-import { IPromptTimelineRail } from './promptTimelineRail.js';
+import { IPromptTimelineAnnotation, IPromptTimelineRail } from './promptTimelineRail.js';
 import { PromptTimelineRulerRail } from './promptTimelineRulerRail.js';
 import { PromptTimelineStickyHeader } from './promptTimelineStickyHeader.js';
 
@@ -72,6 +74,8 @@ export class PromptTimelineWidgetContrib extends Disposable implements IChatWidg
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
+		@IChatSessionAnnotationService private readonly annotationService: IChatSessionAnnotationService,
+		@IMarkdownRendererService private readonly markdownRendererService: IMarkdownRendererService,
 	) {
 		super();
 
@@ -92,11 +96,12 @@ export class PromptTimelineWidgetContrib extends Disposable implements IChatWidg
 	/** (Re)builds the timeline to match the current settings, or tears it down if no surface is enabled. */
 	private _update(): void {
 		this._enablement.clear();
-		// The rail's layout (and the content reservation it needs) is built for the Agents window's
-		// centered session view, so it stays there; the sticky header works in either window.
-		const railStyle = this.environmentService.isSessionsWindow
-			? this.configurationService.getValue<PromptTimelineRailStyle>(PROMPT_TIMELINE_DISPLAY_SETTING)
-			: 'off';
+		// The ruler's layout (and the content reservation it needs) is built for the Agents window's
+		// centered session view, so it stays there. The gutter rail lives in the transcript's existing
+		// left gutter and needs no reservation, so editor windows show it too, where it carries the
+		// session's annotations (e.g. progress digests) beside the chat. The sticky header works in either.
+		const configured = this.configurationService.getValue<PromptTimelineRailStyle>(PROMPT_TIMELINE_DISPLAY_SETTING);
+		const railStyle = this.environmentService.isSessionsWindow || configured === 'gutter' ? configured : 'off';
 		const stickyEnabled = isStickyPromptHeaderShown(this.widget, this.configurationService);
 		if (railStyle !== 'off' || stickyEnabled) {
 			this._createFeature(railStyle, stickyEnabled);
@@ -163,12 +168,29 @@ export class PromptTimelineWidgetContrib extends Disposable implements IChatWidg
 		const ticksObs = railStyle === 'gutter' ? model.promptTicks : model.ticks;
 		const activeObs = railStyle === 'gutter' ? model.activePromptId : model.activeRequestId;
 
+		// The session's annotations (proposed API `chatSessionAnnotations`), for the session this widget shows.
+		const annotations = observableValue<readonly IPromptTimelineAnnotation[]>(this, []);
+		const refreshAnnotations = () => {
+			const session = this.widget.viewModel?.sessionResource;
+			annotations.set(session ? this.annotationService.getAnnotations(session).map(a => this._toRailAnnotation(a)) : [], undefined);
+		};
+		this._enablement.add(this.annotationService.onDidChangeAnnotations(session => {
+			if (session.toString() === this.widget.viewModel?.sessionResource.toString()) {
+				refreshAnnotations();
+			}
+		}));
+		this._enablement.add(this.widget.onDidChangeViewModel(() => refreshAnnotations()));
+		refreshAnnotations();
+
 		this._enablement.add(autorun(reader => {
 			const ticks = ticksObs.read(reader);
+			const notes = annotations.read(reader);
 			// Toggle visibility before rendering so the rail's fit measurement in
-			// setTicks runs against the displayed (non-zero height) element.
-			rail.domNode.classList.toggle('hidden', ticks.length < MIN_RAIL_PROMPTS);
+			// setTicks runs against the displayed (non-zero height) element. A session with notes
+			// shows its timeline from its first prompt.
+			rail.domNode.classList.toggle('hidden', ticks.length < (notes.length ? 1 : MIN_RAIL_PROMPTS));
 			rail.setTicks(ticks);
+			rail.setAnnotations(notes);
 		}));
 
 		this._enablement.add(autorun(reader => {
@@ -182,6 +204,16 @@ export class PromptTimelineWidgetContrib extends Disposable implements IChatWidg
 		}));
 
 		rail.setHostWidth(host.clientWidth);
+	}
+
+	private _toRailAnnotation(a: IChatSessionAnnotation): IPromptTimelineAnnotation {
+		const detail = a.detail;
+		return {
+			id: a.id, timestamp: a.timestamp, label: a.label,
+			...(a.icon ? { icon: a.icon } : {}),
+			...(a.attention ? { attention: true } : {}),
+			...(detail ? { renderDetail: (container: HTMLElement) => this.markdownRendererService.render(detail, {}, container) } : {}),
+		};
 	}
 
 	/**

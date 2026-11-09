@@ -6,6 +6,8 @@
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
+import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
+import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { createDecorator } from '../../../../../platform/instantiation/common/instantiation.js';
 
 // A provider-neutral, append-only event log for every chat session (proposed API
@@ -230,6 +232,30 @@ export interface IChatInputSuggestionService {
 	claimAnswerSurface(session: URI): IDisposable;
 	/** An answer surface showed the suggestion (a marked option, a placeholder) or inserted its free-form text. */
 	reportAnswerInteraction(session: URI, state: 'shown' | 'accepted', acceptedChars?: number): void;
+}
+
+// ---- N5: annotations on a session's timeline (proposed API `chatSessionAnnotations`) ----------
+
+/** A note at a moment of a session (e.g. a progress digest), drawn on its prompt timeline. */
+export interface IChatSessionAnnotation {
+	readonly id: string;
+	readonly timestamp: number;
+	readonly label: string;
+	readonly detail?: IMarkdownString;
+	readonly icon?: ThemeIcon;
+	readonly attention?: boolean;
+}
+
+export const IChatSessionAnnotationService = createDecorator<IChatSessionAnnotationService>('chatSessionAnnotationService');
+
+export interface IChatSessionAnnotationService {
+	readonly _serviceBrand: undefined;
+	/** Replaces one owner's (extension host's) annotations on a session. */
+	setAnnotations(owner: string, session: URI, annotations: readonly IChatSessionAnnotation[]): void;
+	/** Every owner's annotations on a session, oldest first. */
+	getAnnotations(session: URI): readonly IChatSessionAnnotation[];
+	clearOwner(owner: string): void;
+	readonly onDidChangeAnnotations: Event<URI>;
 }
 
 // ---- N3: drafts (proposed API `chatDraftRequests`) -------------------------------------------

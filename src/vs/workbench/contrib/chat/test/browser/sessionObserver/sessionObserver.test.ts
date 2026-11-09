@@ -21,6 +21,7 @@ import { IChatWidget, IChatWidgetService } from '../../../browser/chat.js';
 import { ChatRequestQueueKind, IChatRequestAcceptedEvent, IChatService } from '../../../common/chatService/chatService.js';
 import { CHAT_QUESTION_ANSWER_SCHEME } from '../../../browser/widget/chatContentParts/chatQuestionAnswerEditor.js';
 import { ChatModelProjector } from '../../../browser/sessionObserver/chatModelTranscriptSource.js';
+import { ChatSessionAnnotationService } from '../../../browser/sessionObserver/chatSessionAnnotationService.js';
 import { IChatModel } from '../../../common/model/chatModel.js';
 
 suite('chatSessionObserver', () => {
@@ -212,4 +213,20 @@ suite('chatSessionObserver', () => {
 		projector.flush();
 		assert.deepStrictEqual(appended.slice(4).map(e => [e.kind, e.turnId]), [['turnStarted', 't:1'], ['userMessage', 't:1'], ['agentText', 't:1'], ['turnEnded', 't:1']]);
 	});
+
+	test('annotations: per owner, merged in time order, and gone with their owner', () => {
+		const service = store.add(new ChatSessionAnnotationService());
+		const session = URI.parse('agent-host-copilotcli:/s9');
+		const changed: string[] = [];
+		store.add(service.onDidChangeAnnotations(uri => changed.push(uri.toString())));
+		service.setAnnotations('ext1', session, [{ id: 'd2', timestamp: 20, label: 'later' }]);
+		service.setAnnotations('ext2', session, [{ id: 'x1', timestamp: 10, label: 'earlier' }]);
+		assert.deepStrictEqual(service.getAnnotations(session).map(a => a.id), ['x1', 'd2']);
+		service.clearOwner('ext2');
+		assert.deepStrictEqual(service.getAnnotations(session).map(a => a.id), ['d2']);
+		service.setAnnotations('ext1', session, []);
+		assert.deepStrictEqual(service.getAnnotations(session), []);
+		assert.strictEqual(changed.length, 4);
+	});
 });
+
