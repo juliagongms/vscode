@@ -957,3 +957,17 @@
 .prompt-timeline-rail-gutter.has-annotations .prompt-timeline-gutter-panel {
 	width: 340px;
 }
+
+/* An expanded note shows its whole headline. */
+.prompt-timeline-gutter-annotation.expanded .prompt-timeline-gutter-annotation-head {
+	align-items: flex-start;
+}
+
+.prompt-timeline-gutter-annotation.expanded .prompt-timeline-gutter-annotation-label {
+	white-space: normal;
+}
+
+.prompt-timeline-gutter-annotation.expanded .prompt-timeline-gutter-annotation-icon,
+.prompt-timeline-gutter-annotation.expanded .prompt-timeline-gutter-annotation-age {
+	margin-top: 2px;
+}

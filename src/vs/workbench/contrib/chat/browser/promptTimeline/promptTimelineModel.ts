@@ -22,6 +22,7 @@ import { ChatTreeItem } from '../chat.js';
 import { IChatResponseFileChangesService } from '../chatResponseFileChangesService.js';
 import { IChatEditingService, IEditSessionEntryDiff } from '../../common/editing/chatEditingService.js';
 import { IChatRequestViewModel, isRequestVM, isResponseVM } from '../../common/model/chatViewModel.js';
+import { ChatRequestQueueKind } from '../../common/chatService/chatService.js';
 import { budgetBucketPrompts, MAX_TICKS, PromptItem } from './promptBucketing.js';
 
 /** Aggregated diff stats for the edits a prompt (or bucket) produced. */
@@ -104,7 +105,8 @@ function itemKind(item: ChatTreeItem): PromptItemKind {
 }
 
 function isPromptTimelineRequest(item: ChatTreeItem): item is IChatRequestViewModel {
-	return isRequestVM(item) && !item.isSystemInitiated;
+	// A suggested draft (proposed API `chatDraftRequests`) was never sent: it is no prompt.
+	return isRequestVM(item) && !item.isSystemInitiated && item.pendingKind !== ChatRequestQueueKind.Draft;
 }
 
 // Content "signal" = a cheap, unit-less size proxy (roughly the rendered line
