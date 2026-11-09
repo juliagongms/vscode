@@ -12,6 +12,7 @@ import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, MenuRegistry, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { IEditorOptions } from '../../../../platform/editor/common/editor.js';
 import { ExtensionIdentifier } from '../../../../platform/extensions/common/extensions.js';
@@ -22,7 +23,8 @@ import { IStorageService } from '../../../../platform/storage/common/storage.js'
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../../workbench/browser/editor.js';
-import { DockedEditorInput } from '../../../../workbench/browser/parts/editor/dockedEditorInput.js';
+import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
+import { CHAT_SESSION_PANEL_EDITOR_INPUT_ID } from '../common/chatSessionPanels.js';
 import { EditorPane } from '../../../../workbench/browser/parts/editor/editorPane.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
 import { ActiveEditorContext, AuxiliaryBarVisibleContext, IsAuxiliaryWindowContext, IsSessionsWindowContext, MainEditorAreaVisibleContext } from '../../../../workbench/common/contextkeys.js';
@@ -35,7 +37,6 @@ import { IOverlayWebview, IWebviewService, WebviewContentPurpose } from '../../.
 import { IWebviewViewService, WebviewView } from '../../../../workbench/contrib/webviewView/browser/webviewViewService.js';
 import { IEditorGroup, IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
 import { IExtensionService } from '../../../../workbench/services/extensions/common/extensions.js';
-import { IWorkbenchLayoutService } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { AgentsWindowMenus } from '../../../browser/agentsWindowMenus.js';
 
 // Panels contributed with `chatSessionPanels` (proposed API `chatSessionPanel`) are side-pane
@@ -45,19 +46,20 @@ import { AgentsWindowMenus } from '../../../browser/agentsWindowMenus.js';
 
 const SCHEME = 'chat-session-panel';
 
-export class ChatSessionPanelEditorInput extends DockedEditorInput {
+/**
+ * A plain editor input, not a docked one: the side pane's docked tabs (Changes, Files) live in
+ * its detail-only mode, where the editor area is hidden; a panel needs the editor area, as the
+ * Browser tab does, and the layout gives it the whole side pane (`isEditorWithoutDockedDetails`).
+ */
+export class ChatSessionPanelEditorInput extends EditorInput {
 
-	static readonly ID = 'workbench.input.agentSessions.chatSessionPanel';
+	static readonly ID = CHAT_SESSION_PANEL_EDITOR_INPUT_ID;
 	static readonly EDITOR_ID = 'workbench.editor.agentSessions.chatSessionPanel';
 
 	private _badge: IViewBadge | undefined;
 
-	constructor(
-		readonly panel: IChatSessionPanelDescriptor,
-		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
-		@IEditorGroupsService editorGroupsService: IEditorGroupsService,
-	) {
-		super(editorGroupsService, layoutService);
+	constructor(readonly panel: IChatSessionPanelDescriptor) {
+		super();
 	}
 
 	override get resource(): URI {
@@ -73,7 +75,7 @@ export class ChatSessionPanelEditorInput extends DockedEditorInput {
 	}
 
 	override get capabilities(): EditorInputCapabilities {
-		return super.capabilities | EditorInputCapabilities.Readonly | EditorInputCapabilities.Singleton;
+		return EditorInputCapabilities.Readonly | EditorInputCapabilities.Singleton;
 	}
 
 	override getName(): string {
@@ -264,7 +266,8 @@ async function openPanel(accessor: ServicesAccessor, panel: IChatSessionPanelDes
 	const group = accessor.get(IEditorGroupsService).mainPart.activeGroup;
 	const input = instantiationService.createInstance(ChatSessionPanelEditorInput, panel);
 	const index = group.findEditors(input.resource).length > 0 ? undefined : group.count;
-	await group.openEditor(input, { pinned: true, ...(index !== undefined ? { index } : {}) });
+	// Through the editor service, as the Browser entry does: it also reveals the side pane when it is closed.
+	await accessor.get(IEditorService).openEditor(input, { pinned: true, ...(index !== undefined ? { index } : {}) }, group);
 }
 
 class ChatSessionPanelsAgentsWindowContribution extends Disposable implements IWorkbenchContribution {
@@ -326,6 +329,9 @@ class ChatSessionPanelsAgentsWindowContribution extends Disposable implements IW
 				return openPanel(accessor, panel);
 			}
 		}));
+		// The command an extension uses to reveal its panel in an editor window (`<id>.focus`, from
+		// the view) opens the tab here, so one call works in both kinds of window.
+		store.add(CommandsRegistry.registerCommand(`${panel.id}.focus`, accessor => openPanel(accessor, panel)));
 		// The entry beside Changes and Files, checked while the side pane shows the panel.
 		store.add(MenuRegistry.appendMenuItem(Menus.SessionActivityBar, {
 			command: {
