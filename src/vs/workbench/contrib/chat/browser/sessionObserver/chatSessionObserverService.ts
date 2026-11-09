@@ -293,7 +293,15 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 			readState: { isRead: true }, archived: false,
 			capabilities: { steering: true, queueing: true, inputSuggestions: true, questions: true, planReview: true }, fidelity: NO_FIDELITY,
 		});
-		const sink = { append: (e: readonly IChatSessionEventInput[]) => log.append(e), patchInfo: (p: Partial<Omit<IChatSessionObservedInfo, 'resource'>>) => log.patchInfo(p), storeContent: (t: string) => log.storeContent(t) };
+		const sink = {
+			append: (e: readonly IChatSessionEventInput[]) => log.append(e),
+			// A listed session keeps the sessions list's title; an unlisted one (a chat not yet in the list) takes its source's.
+			patchInfo: (p: Partial<Omit<IChatSessionObservedInfo, 'resource'>>) => {
+				const { title, ...rest } = p;
+				log.patchInfo(listed || !title ? rest : p);
+			},
+			storeContent: (t: string) => log.storeContent(t),
+		};
 		for (const source of this.sources.filter(s => s.canObserve(resource))) {
 			try {
 				log.handle = await source.observe(resource, sink);

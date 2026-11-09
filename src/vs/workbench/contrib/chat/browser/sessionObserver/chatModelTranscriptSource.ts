@@ -72,6 +72,7 @@ export class ChatModelProjector {
 		}
 		const last = this.model.lastRequest;
 		this.sink.patchInfo({
+			...(this.model.title ? { title: this.model.title } : {}),
 			status: this.status,
 			lastActivityAt: Math.max(this.model.lastMessageDate, last?.response?.completedAt ?? 0),
 			...(last ? { lastRequestStartedAt: last.timestamp } : {}),
