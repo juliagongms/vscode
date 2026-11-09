@@ -243,12 +243,12 @@ suite('AgentHostTranscriptSource', () => {
 		assert.deepStrictEqual(diff.split('\n').filter(l => l.startsWith('@@')), ['@@ -1,5 +1,5 @@', '@@ -15,6 +15,6 @@']);
 	});
 
-	test('canObserve leaves Copilot CLI sessions to their own source and needs the connections service', () => {
+	test('canObserve takes agent-host sessions (the CLI source keeps those with a CLI log) and needs the connections service', () => {
 		const connections = { resolveSessionResourceIdentity: (r: URI) => /^(agent-host|remote)-/.test(r.scheme) ? { connectionAuthority: 'local', backendSession: r } : undefined } as unknown as IAgentHostConnectionsService;
 		const withService = { invokeFunction: (fn: (accessor: unknown) => unknown) => fn({ get: () => connections }) } as unknown as IInstantiationService;
 		const source = store.add(new AgentHostTranscriptSource(withService, new NullLogService()));
 		assert.strictEqual(source.priority, 50);
-		assert.deepStrictEqual(['agent-host-claude:/s1', 'agent-host-codex:/s1', 'remote-box-claude:/s1', 'agent-host-copilotcli:/s1', 'copilotcli:/s1', 'vscode-chat-session://local/s1'].map(r => source.canObserve(URI.parse(r))), [true, true, true, false, false, false]);
+		assert.deepStrictEqual(['agent-host-claude:/s1', 'agent-host-codex:/s1', 'remote-box-claude:/s1', 'agent-host-copilotcli:/s1', 'copilotcli:/s1', 'vscode-chat-session://local/s1'].map(r => source.canObserve(URI.parse(r))), [true, true, true, true, false, false]);
 
 		const without = { invokeFunction: () => { throw new Error('unknown service'); } } as unknown as IInstantiationService;
 		const missing = store.add(new AgentHostTranscriptSource(without, new NullLogService()));

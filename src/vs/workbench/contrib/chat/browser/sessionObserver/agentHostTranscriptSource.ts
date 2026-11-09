@@ -30,7 +30,7 @@ import {
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { ChatSessionObservedStatus, ChatSessionUserMessageOrigin, IChatSessionContentRef, IChatSessionEventAttachment, IChatSessionEventInput, IChatSessionFidelity, IChatSessionTranscriptSink, IChatSessionTranscriptSource } from '../../common/sessionObserver/chatSessionObserver.js';
-import { COPILOT_CLI_EH_SCHEME, COPILOT_CLI_LOCAL_AH_SCHEME } from '../copilotCliEventsUri.js';
+import { COPILOT_CLI_EH_SCHEME } from '../copilotCliEventsUri.js';
 
 type Ev = IChatSessionEventInput;
 type Questions = Extract<Ev, { kind: 'question' }>['questions'];
@@ -976,7 +976,9 @@ export class AgentHostTranscriptSource extends Disposable implements IChatSessio
 	}
 
 	canObserve(resource: URI): boolean {
-		if (resource.scheme === COPILOT_CLI_LOCAL_AH_SCHEME || resource.scheme === COPILOT_CLI_EH_SCHEME || !parseAgentHostHarness(resource.scheme)) {
+		// A local Copilot agent-host session is the Copilot CLI source's when its CLI log is found
+		// under the session's id (richer: model calls, per-event times); this source takes it otherwise.
+		if (resource.scheme === COPILOT_CLI_EH_SCHEME || !parseAgentHostHarness(resource.scheme)) {
 			return false;
 		}
 		try {

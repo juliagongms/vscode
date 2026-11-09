@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
-import { Emitter } from '../../../../../base/common/event.js';
+import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable, DisposableMap, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ResourceMap } from '../../../../../base/common/map.js';
 import { Schemas } from '../../../../../base/common/network.js';
@@ -82,6 +82,8 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		super();
 		const provider: InlineCompletionsProvider<ISuggestionList> = {
 			groupId: 'chatInputSuggestion',
+			// A new or withdrawn suggestion refetches in every input showing one, so none keeps a stale one.
+			onDidChangeInlineCompletions: Event.map(this._onDidChangeSuggestions.event, () => undefined),
 			provideInlineCompletions: (model, position, context, token) => this.provide(model, position, context, token),
 			handleItemDidShow: (_list, item) => this.onShown(item),
 			handlePartialAccept: (_list, item, _chars, info) => this.onAccepted(item, info.acceptedLength, true),
@@ -143,6 +145,18 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		InlineCompletionsController.get(w.inputEditor)?.model.get()?.trigger();
 	}
 
+	/**
+	 * Drops what the session's inputs show now: an input keeps an inline completion that is still
+	 * valid (forward stability), so a replaced suggestion would otherwise stay until the user types.
+	 */
+	private clearShown(session: URI): void {
+		for (const w of this.chatWidgetService.getAllWidgets()) {
+			if (w.viewModel?.sessionResource.toString() === session.toString()) {
+				InlineCompletionsController.get(w.inputEditor)?.model.get()?.stop();
+			}
+		}
+	}
+
 	/** Restores the configured inline-suggestion setting on the inputs bound to a session. */
 	private restore(session: URI): void {
 		const enabled = this.configurationService.getValue<boolean>(chatInputInlineCompletionsSetting) === true;
@@ -199,6 +213,7 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		} else {
 			this.entries.delete(session);
 		}
+		this.clearShown(session);
 		this._onDidChangeSuggestions.fire(session);
 		if (!suggestion) {
 			this.restore(session);

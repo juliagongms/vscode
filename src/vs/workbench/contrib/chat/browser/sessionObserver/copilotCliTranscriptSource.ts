@@ -414,6 +414,12 @@ export class CopilotCliTranscriptSource extends Disposable implements IChatSessi
 		const rawId = getCopilotCliSessionRawId(resource)!;
 		const eventsUri = buildLocalEventsUri(this.copilotHomeService.home, rawId);
 		const workspaceUri = URI.joinPath(eventsUri, '..', 'workspace.yaml');
+		// An agent host may back its session with a CLI session of another id (the backing is
+		// created at the first send, under its own id). Without a log under this id, the
+		// agent-host protocol source observes the session instead.
+		if (resource.scheme === COPILOT_CLI_LOCAL_AH_SCHEME && !await this.fileService.exists(URI.joinPath(eventsUri, '..'))) {
+			throw new Error(`No Copilot CLI log for ${resource.toString()}`);
+		}
 		const mapper = new CopilotCliEventMapper();
 		let offset = 0;
 		let partial = '';

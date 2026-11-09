@@ -94,7 +94,7 @@ suite('chatSessionObserver', () => {
 		const model = store.add(createTextModel('', null, undefined, URI.from({ scheme: Schemas.vscodeChatInput, path: '/input-1' })));
 		const widget = {
 			viewModel: { sessionResource: session, model: { hasRequests: true } },
-			inputEditor: { getModel: () => model, hasTextFocus: () => false, onDidFocusEditorText: Event.None, updateOptions: () => { }, getOption: () => '' },
+			inputEditor: { getModel: () => model, hasTextFocus: () => false, onDidFocusEditorText: Event.None, updateOptions: () => { }, getOption: () => '', getContribution: () => undefined },
 		} as unknown as IChatWidget;
 		const widgets = { getAllWidgets: () => [widget], onDidAddWidget: Event.None } as unknown as IChatWidgetService;
 		const accepted = store.add(new Emitter<IChatRequestAcceptedEvent>());
@@ -142,7 +142,7 @@ suite('chatSessionObserver', () => {
 		const input = store.add(createTextModel('', null, undefined, URI.from({ scheme: Schemas.vscodeChatInput, path: '/input-2' })));
 		const widget = {
 			viewModel: { sessionResource: session, model: { hasRequests: true } },
-			inputEditor: { getModel: () => input, hasTextFocus: () => false, onDidFocusEditorText: Event.None, updateOptions: () => { }, getOption: () => '' },
+			inputEditor: { getModel: () => input, hasTextFocus: () => false, onDidFocusEditorText: Event.None, updateOptions: () => { }, getOption: () => '', getContribution: () => undefined },
 		} as unknown as IChatWidget;
 		const widgets = { getAllWidgets: () => [widget], onDidAddWidget: Event.None } as unknown as IChatWidgetService;
 		const chatService = { onDidAcceptRequest: Event.None } as unknown as IChatService;
