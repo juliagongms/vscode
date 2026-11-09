@@ -4,21 +4,21 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Codicon } from '../../../../../base/common/codicons.js';
-import { Disposable, DisposableMap } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
-import { localize, localize2 } from '../../../../../nls.js';
+import { localize } from '../../../../../nls.js';
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
 import { InstantiationType, registerSingleton } from '../../../../../platform/instantiation/common/extensions.js';
 import { Registry } from '../../../../../platform/registry/common/platform.js';
-import { ViewPaneContainer } from '../../../../browser/parts/views/viewPaneContainer.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../common/contributions.js';
-import { Extensions as ViewExtensions, ICustomViewDescriptor, IViewContainersRegistry, IViewsRegistry, ViewContainerLocation, WindowEnablement } from '../../../../common/views.js';
+import { Extensions as ViewExtensions, ICustomViewDescriptor, IViewContainersRegistry, IViewsRegistry, WindowEnablement } from '../../../../common/views.js';
 import { IWorkbenchEnvironmentService } from '../../../../services/environment/common/environmentService.js';
 import { isProposedApiEnabled } from '../../../../services/extensions/common/extensions.js';
 import { ExtensionsRegistry } from '../../../../services/extensions/common/extensionsRegistry.js';
 import { WebviewViewPane } from '../../../webviewView/browser/webviewViewPane.js';
-import { IChatDraftRequestService, IChatInputSuggestionService, IChatSessionObserverService } from '../../common/sessionObserver/chatSessionObserver.js';
-import { ChatViewContainerId } from '../chat.js';
+import { chatSessionPanelRegistry, IChatDraftRequestService, IChatInputSuggestionService, IChatSessionObserverService } from '../../common/sessionObserver/chatSessionObserver.js';
+import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
+import { ChatViewContainerId, IChatWidget, IChatWidgetService } from '../chat.js';
 import { ChatDraftRequestService } from './chatDraftRequestService.js';
 import { ChatInputSuggestionService } from './chatInputSuggestionService.js';
 import { ChatSessionObserverService } from './chatSessionObserverService.js';
@@ -58,20 +58,6 @@ const chatSessionPanelsExtensionPoint = ExtensionsRegistry.registerExtensionPoin
 	},
 });
 
-/** The Agents Window's container for session panels, in the side pane next to the session. */
-export const CHAT_SESSION_PANELS_CONTAINER_ID = 'workbench.view.chatSessionPanels';
-
-const agentsWindowContainer = Registry.as<IViewContainersRegistry>(ViewExtensions.ViewContainersRegistry).registerViewContainer({
-	id: CHAT_SESSION_PANELS_CONTAINER_ID,
-	title: localize2('chatSessionPanels.container', "Session"),
-	icon: Codicon.pulse,
-	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [CHAT_SESSION_PANELS_CONTAINER_ID, { mergeViewWithContainerWhenSingleView: true }]),
-	storageId: CHAT_SESSION_PANELS_CONTAINER_ID,
-	hideIfEmpty: true,
-	order: 100,
-	windowEnablement: WindowEnablement.Sessions,
-}, ViewContainerLocation.AuxiliaryBar);
-
 class ChatSessionPanelsContribution extends Disposable implements IWorkbenchContribution {
 	static readonly ID = 'workbench.contrib.chatSessionPanels';
 
@@ -93,8 +79,13 @@ class ChatSessionPanelsContribution extends Disposable implements IWorkbenchCont
 					continue;
 				}
 				for (const c of ext.value) {
-					// Editor windows: stacked with the Chat view in its container. Agents Window: the side pane.
-					const container = environmentService.isSessionsWindow ? agentsWindowContainer : containers.get(ChatViewContainerId);
+					// The Agents Window shows panels as side-pane tabs (vs/sessions/contrib/chatSessionPanels).
+					if (environmentService.isSessionsWindow) {
+						this.registered.set(c.id, chatSessionPanelRegistry.register({ id: c.id, title: c.title, ...(c.icon ? { icon: c.icon.replace(/^\$\((.*)\)$/, '$1') } : {}), extensionId: ext.description.identifier.value }));
+						continue;
+					}
+					// Editor windows: stacked with the Chat view in its container.
+					const container = containers.get(ChatViewContainerId);
 					if (!container) {
 						continue;
 					}
@@ -107,11 +98,11 @@ class ChatSessionPanelsContribution extends Disposable implements IWorkbenchCont
 						containerIcon: icon ?? Codicon.pulse,
 						canToggleVisibility: true,
 						canMoveView: true,
-						collapsed: !environmentService.isSessionsWindow,
-						order: environmentService.isSessionsWindow ? 0 : -1,
+						collapsed: false,
+						order: -1,
 						extensionId: ext.description.identifier,
 						originalContainerId: container.id,
-						windowEnablement: WindowEnablement.Both,
+						windowEnablement: WindowEnablement.Editor,
 					};
 					viewsRegistry.registerViews([descriptor], container);
 					this.registered.set(c.id, { dispose: () => viewsRegistry.deregisterViews([descriptor], container) });
@@ -122,3 +113,45 @@ class ChatSessionPanelsContribution extends Disposable implements IWorkbenchCont
 }
 
 registerWorkbenchContribution2(ChatSessionPanelsContribution.ID, ChatSessionPanelsContribution, WorkbenchPhase.BlockStartup);
+
+/** Keeps each chat widget's `chatSessionHasDraftRequest` key current, for the draft keyboard actions. */
+class ChatDraftRequestContextContribution extends Disposable implements IWorkbenchContribution {
+	static readonly ID = 'workbench.contrib.chatDraftRequestContext';
+
+	private readonly widgets = this._register(new DisposableMap<IChatWidget>());
+
+	constructor(
+		@IChatWidgetService widgetService: IChatWidgetService,
+		@IChatDraftRequestService private readonly drafts: IChatDraftRequestService,
+	) {
+		super();
+		for (const w of widgetService.getAllWidgets()) {
+			this.track(w);
+		}
+		this._register(widgetService.onDidAddWidget(w => this.track(w)));
+		this._register(widgetService.onDidRemoveWidget(w => this.widgets.deleteAndDispose(w)));
+	}
+
+	private track(widget: IChatWidget): void {
+		if (this.widgets.has(widget)) {
+			return;
+		}
+		const store = new DisposableStore();
+		const key = ChatContextKeys.hasDraftRequest.bindTo(widget.scopedContextKeyService);
+		const update = () => {
+			const session = widget.viewModel?.sessionResource;
+			key.set(!!session && this.drafts.getDrafts(session).length > 0);
+		};
+		update();
+		store.add(widget.onDidChangeViewModel(update));
+		store.add(this.drafts.onDidChangeDrafts(uri => {
+			if (uri.toString() === widget.viewModel?.sessionResource.toString()) {
+				update();
+			}
+		}));
+		store.add({ dispose: () => key.reset() });
+		this.widgets.set(widget, store);
+	}
+}
+
+registerWorkbenchContribution2(ChatDraftRequestContextContribution.ID, ChatDraftRequestContextContribution, WorkbenchPhase.AfterRestored);

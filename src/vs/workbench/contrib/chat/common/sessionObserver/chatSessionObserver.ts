@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Event } from '../../../../../base/common/event.js';
-import { IDisposable } from '../../../../../base/common/lifecycle.js';
+import { Emitter, Event } from '../../../../../base/common/event.js';
+import { IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { createDecorator } from '../../../../../platform/instantiation/common/instantiation.js';
 
@@ -194,6 +194,8 @@ export interface IChatInputSuggestionEvent {
 	readonly owner: string;
 	readonly state: ChatInputSuggestionState;
 	readonly acceptedChars?: number;
+	/** For an answer: the options the user picked when it was accepted. */
+	readonly selectedOptions?: readonly string[];
 	readonly host: ActiveChatSessionHost;
 	readonly reason?: string;
 }
@@ -219,6 +221,15 @@ export interface IChatInputSuggestionService {
 	readonly onDidChangeSuggestionState: Event<IChatInputSuggestionEvent>;
 	readonly onDidSubmitRequest: Event<IChatRequestSubmission>;
 	reportState(session: URI, id: string, state: ChatInputSuggestionState, host: ActiveChatSessionHost, details?: { acceptedChars?: number; reason?: string }): void;
+	/**
+	 * A question carousel or plan review was answered: reports it as a submission, and as an
+	 * accepted suggestion when it picked exactly the suggested options or kept its free-form text.
+	 */
+	reportAnswer(session: URI, answer: { readonly kind: 'answer' | 'planDecision'; readonly selected: readonly string[]; readonly text: string }): void;
+	/** An open question carousel or plan review takes the session's answer while it is shown; the chat input defers to it. */
+	claimAnswerSurface(session: URI): IDisposable;
+	/** An answer surface showed the suggestion (a marked option, a placeholder) or inserted its free-form text. */
+	reportAnswerInteraction(session: URI, state: 'shown' | 'accepted', acceptedChars?: number): void;
 }
 
 // ---- N3: drafts (proposed API `chatDraftRequests`) -------------------------------------------
@@ -264,3 +275,44 @@ export interface IChatDraftRequestService {
 	/** Marks a draft as about to be submitted as is (Steer Now, Queue); the submission resolves it. */
 	stageForSubmit(id: string): void;
 }
+
+// ---- N4: panels beside the active session (proposed API `chatSessionPanel`) --------------------
+
+export interface IChatSessionPanelDescriptor {
+	readonly id: string;
+	readonly title: string;
+	/** A codicon id, e.g. `pulse`. */
+	readonly icon?: string;
+	readonly extensionId: string;
+}
+
+/**
+ * The panels extensions contribute. Editor windows show them as views beside the Chat view;
+ * the Agents Window shows them as side-pane tabs (its side pane is an editor group).
+ */
+class ChatSessionPanelRegistry {
+	private readonly panels = new Map<string, IChatSessionPanelDescriptor>();
+	private readonly _onDidChange = new Emitter<void>();
+	readonly onDidChange: Event<void> = this._onDidChange.event;
+
+	register(panel: IChatSessionPanelDescriptor): IDisposable {
+		this.panels.set(panel.id, panel);
+		this._onDidChange.fire();
+		return toDisposable(() => {
+			if (this.panels.get(panel.id) === panel) {
+				this.panels.delete(panel.id);
+				this._onDidChange.fire();
+			}
+		});
+	}
+
+	get(id: string): IChatSessionPanelDescriptor | undefined {
+		return this.panels.get(id);
+	}
+
+	all(): readonly IChatSessionPanelDescriptor[] {
+		return [...this.panels.values()];
+	}
+}
+
+export const chatSessionPanelRegistry = new ChatSessionPanelRegistry();

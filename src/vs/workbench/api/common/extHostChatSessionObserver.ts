@@ -11,31 +11,114 @@ import { revive } from '../../../base/common/marshalling.js';
 import { URI } from '../../../base/common/uri.js';
 import { IExtensionDescription } from '../../../platform/extensions/common/extensions.js';
 import { ExtHostChatSessionObserverShape, IMainContext, MainContext, MainThreadChatSessionObserverShape } from './extHost.protocol.js';
-import { ExtHostWebviewViews } from './extHostWebviewView.js';
 import { Range } from './extHostTypes.js';
+import { ExtHostWebviewViews } from './extHostWebviewView.js';
 
-type Info = vscode.ChatSessionInfo;
-type Event_ = vscode.ChatSessionEvent;
+// The internal model uses strings; the API uses enums whose values are the 1-based position
+// of each string here (the order of the members in the proposal's enum).
 
-function toApiEvent(raw: unknown): Event_ {
-	const e = revive(raw) as Record<string, unknown>;
-	if (e.kind === 'userMessage' && Array.isArray(e.attachments)) {
+const EVENT_KIND = ['turnStarted', 'userMessage', 'agentText', 'reasoning', 'toolCall', 'toolOutput', 'toolResult', 'edit', 'editDecision', 'question', 'questionAnswer', 'planReview', 'planReviewDecision', 'permission', 'permissionDecision', 'todos', 'subagentStarted', 'subagentEnded', 'compaction', 'modelCall', 'modelChanged', 'modeChanged', 'notification', 'pullRequest', 'error', 'turnEnded', 'pending', 'input', 'transcriptVisibility'];
+const STATUS = ['working', 'waiting', 'question', 'finished', 'failed', 'cancelled'];
+const FIDELITY = {
+	reasoning: ['full', 'summary', 'none'],
+	toolOutput: ['full', 'truncated'],
+	diffs: ['perEdit', 'perTurn', 'aggregate', 'none'],
+	timestamps: ['perEvent', 'perTurn'],
+};
+const ATTACHMENT_KIND = ['file', 'selection', 'directory', 'image', 'symbol', 'url', 'promptFile', 'other'];
+const HOST = ['chatView', 'chatEditor', 'quickChat', 'agentsWindow', 'inbox'];
+const WINDOW_KIND = ['editor', 'agents'];
+const SUGGESTION_STATE = ['shown', 'hidden', 'accepted', 'partiallyAccepted', 'rejected', 'superseded', 'invalidated'];
+const SUBMISSION_KIND = ['send', 'steer', 'queue', 'answer', 'planDecision'];
+const DRAFT_STATE = ['shown', 'hidden', 'editing'];
+const DRAFT_OUTCOME = ['steered', 'queued', 'sent', 'discarded', 'expired'];
+
+/** Per event kind: which fields are enums, and their tables. `[]` marks an array of objects. */
+const EVENT_FIELDS: Record<string, Record<string, readonly string[] | { each: string; table: readonly string[] }>> = {
+	turnStarted: { trigger: ['user', 'system', 'autopilot', 'steering', 'queued'] },
+	userMessage: { origin: ['user', 'system', 'autopilot', 'notification', 'skill', 'extension', 'agent'], submitKind: ['send', 'steer', 'queue'], attachments: { each: 'kind', table: ATTACHMENT_KIND } },
+	reasoning: { availability: ['full', 'summary', 'redacted', 'none'] },
+	toolOutput: { stream: ['stdout', 'stderr', 'content'] },
+	toolResult: { status: ['completed', 'failed', 'cancelled', 'denied', 'timedOut'] },
+	edit: { operation: ['modify', 'create', 'delete', 'rename'] },
+	editDecision: { decision: ['kept', 'undone', 'modifiedByUser'] },
+	question: { questions: { each: 'kind', table: ['single', 'multi', 'text'] } },
+	questionAnswer: { actor: ['user', 'auto'] },
+	permissionDecision: { decision: ['allowed', 'denied', 'auto'] },
+	todos: { items: { each: 'status', table: ['not-started', 'in-progress', 'completed'] } },
+	subagentEnded: { status: ['completed', 'failed', 'cancelled'] },
+	compaction: { trigger: ['auto', 'manual'] },
+	pullRequest: { action: ['opened', 'updated', 'linked'] },
+	turnEnded: { outcome: ['completed', 'needsInput', 'cancelled', 'failed'], cancelledBy: ['user', 'system'] },
+	pending: { items: { each: 'kind', table: ['queued', 'steering'] } },
+};
+
+function enumOf(table: readonly string[], value: unknown): number | undefined {
+	const i = typeof value === 'string' ? table.indexOf(value) : -1;
+	return i >= 0 ? i + 1 : undefined;
+}
+
+
+export function toApiEvent(raw: unknown): vscode.ChatSessionEvent {
+	const e = { ...(revive(raw) as Record<string, unknown>) };
+	const kind = e.kind as string;
+	for (const [field, spec] of Object.entries(EVENT_FIELDS[kind] ?? {})) {
+		const value = e[field];
+		if (value === undefined) {
+			continue;
+		}
+		if (Array.isArray(spec)) {
+			e[field] = enumOf(spec, value);
+		} else if (Array.isArray(value)) {
+			const { each, table } = spec as { each: string; table: readonly string[] };
+			e[field] = value.map((item: Record<string, unknown>) => ({ ...item, [each]: enumOf(table, item[each]) }));
+		}
+	}
+	if (kind === 'userMessage' && Array.isArray(e.attachments)) {
 		e.attachments = (e.attachments as Record<string, unknown>[]).map(a => {
 			const r = a.range as { startLineNumber: number; endLineNumber: number } | undefined;
 			return r ? { ...a, range: new Range(r.startLineNumber - 1, 0, r.endLineNumber - 1, 0) } : a;
 		});
 	}
-	return Object.freeze(e) as unknown as Event_;
+	e.kind = enumOf(EVENT_KIND, kind);
+	return Object.freeze(e) as unknown as vscode.ChatSessionEvent;
+}
+
+export function toApiInfo(raw: unknown): vscode.ChatSessionInfo {
+	const i = { ...(revive(raw) as Record<string, unknown>) };
+	i.status = enumOf(STATUS, i.status);
+	const f = i.fidelity as Record<string, unknown> | undefined;
+	if (f) {
+		i.fidelity = {
+			...f,
+			reasoning: enumOf(FIDELITY.reasoning, f.reasoning),
+			toolOutput: enumOf(FIDELITY.toolOutput, f.toolOutput),
+			diffs: enumOf(FIDELITY.diffs, f.diffs),
+			timestamps: enumOf(FIDELITY.timestamps, f.timestamps),
+		};
+	}
+	return Object.freeze(i) as unknown as vscode.ChatSessionInfo;
+}
+
+function toApiActive(raw: unknown): vscode.ActiveChatSession {
+	const a = { ...(revive(raw) as Record<string, unknown>) };
+	a.host = enumOf(HOST, a.host);
+	a.windowKind = enumOf(WINDOW_KIND, a.windowKind);
+	return Object.freeze(a) as unknown as vscode.ActiveChatSession;
+}
+
+function hostOf(value: unknown): vscode.ChatSessionHost {
+	return (enumOf(HOST, value) ?? 1) as vscode.ChatSessionHost;
 }
 
 class Observation extends Disposable implements vscode.ChatSessionObservation {
-	readonly events: Event_[];
-	readonly _onDidAppend = this._register(new Emitter<readonly Event_[]>());
-	readonly onDidAppend = this._onDidAppend.event;
-	readonly _onDidChangeInfo = this._register(new Emitter<Info>());
+	readonly events: vscode.ChatSessionEvent[];
+	readonly _onDidReceiveEvents = this._register(new Emitter<readonly vscode.ChatSessionEvent[]>());
+	readonly onDidReceiveEvents = this._onDidReceiveEvents.event;
+	readonly _onDidChangeInfo = this._register(new Emitter<vscode.ChatSessionInfo>());
 	readonly onDidChangeInfo = this._onDidChangeInfo.event;
 
-	constructor(public info: Info, events: Event_[], private readonly fetch: (ref: vscode.ChatSessionContentRef) => Thenable<string>, private readonly onDispose: () => void) {
+	constructor(public info: vscode.ChatSessionInfo, events: vscode.ChatSessionEvent[], private readonly fetch: (ref: vscode.ChatSessionContentRef) => Thenable<string>, private readonly onDispose: () => void) {
 		super();
 		this.events = events;
 	}
@@ -48,6 +131,11 @@ class Observation extends Disposable implements vscode.ChatSessionObservation {
 		this.onDispose();
 		super.dispose();
 	}
+}
+
+interface IDraftEntry {
+	readonly state: Emitter<vscode.ChatDraftRequestStateChange>;
+	readonly end: Emitter<vscode.ChatDraftRequestResolution>;
 }
 
 export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverShape {
@@ -63,9 +151,9 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 	readonly onDidChangeActiveChatSessions = this._onDidChangeActiveChatSessions.event;
 	private readonly _onDidChangeChatInputSuggestion = new Emitter<vscode.ChatInputSuggestionEvent>();
 	readonly onDidChangeChatInputSuggestion = this._onDidChangeChatInputSuggestion.event;
-	private readonly _onDidSubmitChatRequest = new Emitter<vscode.ChatRequestSubmission>();
-	readonly onDidSubmitChatRequest = this._onDidSubmitChatRequest.event;
-	private readonly drafts = new Map<string, { state: Emitter<{ state: 'shown' | 'hidden' | 'editing'; host: vscode.ActiveChatSession['host'] }>; resolve: Emitter<vscode.ChatDraftRequestResolution> }>();
+	private readonly _onDidSendChatRequest = new Emitter<vscode.ChatRequestSubmission>();
+	readonly onDidSendChatRequest = this._onDidSendChatRequest.event;
+	private readonly drafts = new Map<string, IDraftEntry>();
 
 	constructor(mainContext: IMainContext, private readonly webviewViews: ExtHostWebviewViews) {
 		this.proxy = mainContext.getProxy(MainContext.MainThreadChatSessionObserver);
@@ -73,22 +161,22 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 
 	private start(): Promise<void> {
 		this.started ??= this.proxy.$startListening().then(active => {
-			this.active = revive(active) as vscode.ActiveChatSession[];
+			this.active = active.map(toApiActive);
 		});
 		return this.started;
 	}
 
 	// ---- chatSessionObserver ----
 
-	async getChatSessions(filter?: { readonly activeSince?: number }): Promise<readonly Info[]> {
+	async getChatSessions(filter?: { readonly activeSince?: number }): Promise<readonly vscode.ChatSessionInfo[]> {
 		void this.start();
-		return revive(await this.proxy.$getChatSessions(filter?.activeSince)) as Info[];
+		return (await this.proxy.$getChatSessions(filter?.activeSince)).map(toApiInfo);
 	}
 
 	async observeChatSession(resource: vscode.Uri, options?: { readonly fromSeq?: number }): Promise<vscode.ChatSessionObservation> {
 		const handle = this.nextHandle++;
 		const { info, events } = await this.proxy.$observeChatSession(handle, resource, options?.fromSeq);
-		const obs = new Observation(revive(info) as Info, events.map(toApiEvent), ref => this.proxy.$fetchContent(handle, ref), () => {
+		const obs = new Observation(toApiInfo(info), events.map(toApiEvent), ref => this.proxy.$fetchContent(handle, ref), () => {
 			this.observations.delete(handle);
 			this.proxy.$disposeObservation(handle);
 		});
@@ -114,11 +202,12 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 	}
 
 	$onDidChangeChatSessions(e: unknown): void {
-		this._onDidChangeChatSessions.fire(revive(e) as vscode.ChatSessionsChangeEvent);
+		const ev = revive(e) as { added: unknown[]; removed: vscode.Uri[]; changed: unknown[] };
+		this._onDidChangeChatSessions.fire({ added: ev.added.map(toApiInfo), removed: ev.removed, changed: ev.changed.map(toApiInfo) });
 	}
 
 	$onDidChangeActiveChatSessions(active: unknown[]): void {
-		this.active = Object.freeze(revive(active) as vscode.ActiveChatSession[]);
+		this.active = Object.freeze(active.map(toApiActive));
 		this._onDidChangeActiveChatSessions.fire(this.active);
 	}
 
@@ -127,14 +216,14 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 		if (obs) {
 			const mapped = events.map(toApiEvent);
 			obs.events.push(...mapped);
-			obs._onDidAppend.fire(mapped);
+			obs._onDidReceiveEvents.fire(mapped);
 		}
 	}
 
 	$onDidChangeInfo(handle: number, info: unknown): void {
 		const obs = this.observations.get(handle);
 		if (obs) {
-			obs.info = revive(info) as Info;
+			obs.info = toApiInfo(info);
 			obs._onDidChangeInfo.fire(obs.info);
 		}
 	}
@@ -151,53 +240,60 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 	}
 
 	$onDidChangeChatInputSuggestion(e: unknown): void {
-		const ev = revive(e) as vscode.ChatInputSuggestionEvent & { owner?: string };
-		const { owner: _owner, ...rest } = ev;
-		this._onDidChangeChatInputSuggestion.fire(rest);
+		const ev = revive(e) as Record<string, unknown>;
+		this._onDidChangeChatInputSuggestion.fire({
+			id: ev.id as string, session: ev.session as vscode.Uri,
+			state: (enumOf(SUGGESTION_STATE, ev.state) ?? 2) as vscode.ChatInputSuggestionState,
+			host: hostOf(ev.host),
+			...(typeof ev.acceptedChars === 'number' ? { acceptedChars: ev.acceptedChars } : {}),
+			...(Array.isArray(ev.selectedOptions) ? { selectedOptions: ev.selectedOptions as string[] } : {}),
+			...(typeof ev.reason === 'string' ? { reason: ev.reason } : {}),
+		});
 	}
 
 	$onDidSubmitChatRequest(e: unknown): void {
-		const ev = revive(e) as vscode.ChatRequestSubmission & { fromSuggestion?: { owner?: string }; fromDraft?: { owner?: string } };
-		this._onDidSubmitChatRequest.fire({
-			...ev,
-			...(ev.fromSuggestion ? { fromSuggestion: { id: (ev.fromSuggestion as { id: string }).id, acceptedChars: (ev.fromSuggestion as { acceptedChars: number }).acceptedChars } } : {}),
-			...(ev.fromDraft ? { fromDraft: { id: (ev.fromDraft as { id: string }).id } } : {}),
+		const ev = revive(e) as Record<string, unknown> & { fromSuggestion?: { id: string; acceptedChars: number }; fromDraft?: { id: string } };
+		this._onDidSendChatRequest.fire({
+			session: ev.session as vscode.Uri, requestId: ev.requestId as string, text: ev.text as string,
+			kind: (enumOf(SUBMISSION_KIND, ev.kind) ?? 1) as vscode.ChatRequestSubmissionKind,
+			host: hostOf(ev.host),
+			...(ev.fromSuggestion ? { fromSuggestion: { id: ev.fromSuggestion.id, acceptedChars: ev.fromSuggestion.acceptedChars } } : {}),
+			...(ev.fromDraft ? { fromDraft: { id: ev.fromDraft.id } } : {}),
 		});
 	}
 
 	// ---- chatDraftRequests ----
 
 	addChatDraftRequest(session: vscode.Uri, draft: vscode.ChatDraftRequest): vscode.ChatDraftRequestHandle {
-		const state = new Emitter<{ state: 'shown' | 'hidden' | 'editing'; host: vscode.ActiveChatSession['host'] }>();
-		const resolve = new Emitter<vscode.ChatDraftRequestResolution>();
-		this.drafts.set(draft.id, { state, resolve });
+		const entry: IDraftEntry = { state: new Emitter(), end: new Emitter() };
+		this.drafts.set(draft.id, entry);
 		this.proxy.$addChatDraftRequest(session, { id: draft.id, text: draft.text, label: draft.label, ...(draft.detail ? { detail: draft.detail } : {}), ...(draft.warning ? { warning: draft.warning } : {}) });
 		let disposed = false;
 		return {
 			id: draft.id,
 			update: patch => this.proxy.$updateChatDraftRequest(draft.id, { ...patch }),
-			onDidChangeState: state.event,
-			onDidResolve: resolve.event,
+			onDidChangeState: entry.state.event,
+			onDidEnd: entry.end.event,
 			dispose: () => {
 				if (!disposed) {
 					disposed = true;
 					this.proxy.$disposeChatDraftRequest(draft.id);
 					this.drafts.delete(draft.id);
-					state.dispose();
-					resolve.dispose();
+					entry.state.dispose();
+					entry.end.dispose();
 				}
 			},
 		};
 	}
 
-	$onDidChangeDraftState(id: string, state: 'shown' | 'hidden' | 'editing', host: string): void {
-		this.drafts.get(id)?.state.fire({ state, host: host as vscode.ActiveChatSession['host'] });
+	$onDidChangeDraftState(id: string, state: string, host: string): void {
+		this.drafts.get(id)?.state.fire({ state: (enumOf(DRAFT_STATE, state) ?? 1) as vscode.ChatDraftRequestState, host: hostOf(host) });
 	}
 
 	$onDidResolveDraft(id: string, resolution: { outcome: string; finalText?: string; edited: boolean; reason?: string; requestId?: string }): void {
 		const d = this.drafts.get(id);
 		if (d) {
-			d.resolve.fire(resolution as vscode.ChatDraftRequestResolution);
+			d.end.fire({ ...resolution, outcome: (enumOf(DRAFT_OUTCOME, resolution.outcome) ?? 5) as vscode.ChatDraftRequestOutcome });
 			this.drafts.delete(id);
 		}
 	}
@@ -206,27 +302,29 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 
 	registerChatSessionPanelProvider(extension: IExtensionDescription, id: string, provider: vscode.ChatSessionPanelProvider, options?: { readonly webviewOptions?: { readonly retainContextWhenHidden?: boolean } }): vscode.Disposable {
 		const store = new DisposableStore();
-		const current = (): URI | undefined => {
-			const a = this.active.find(x => x.windowFocused) ?? this.active[0];
-			return a?.resource;
-		};
-		let view: vscode.WebviewView | undefined;
-		let shown: string | undefined;
-		store.add(this.onDidChangeActiveChatSessions(() => {
-			const s = current();
-			if (view && s?.toString() !== shown) {
-				shown = s?.toString();
-				provider.onDidChangeChatSessionPanelSession?.(view, s);
-			}
-		}));
+		const current = (): URI | undefined => (this.active.find(x => x.windowFocused) ?? this.active[0])?.resource;
 		store.add(this.webviewViews.registerWebviewViewProvider(extension, id, {
-			resolveWebviewView: async (v, _ctx, token) => {
+			resolveWebviewView: async (webviewView, _ctx, token) => {
 				await this.start();
-				view = v;
-				const s = current();
-				shown = s?.toString();
-				v.onDidDispose(() => { view = undefined; });
-				return provider.resolveChatSessionPanel(v, s, token ?? CancellationToken.None);
+				const onDidChangeSession = new Emitter<vscode.Uri | undefined>();
+				let session = current();
+				const listener = this.onDidChangeActiveChatSessions(() => {
+					const next = current();
+					if (next?.toString() !== session?.toString()) {
+						session = next;
+						onDidChangeSession.fire(next);
+					}
+				});
+				webviewView.onDidDispose(() => {
+					listener.dispose();
+					onDidChangeSession.dispose();
+				});
+				const panel: vscode.ChatSessionPanel = {
+					webviewView,
+					get session() { return session; },
+					onDidChangeSession: onDidChangeSession.event,
+				};
+				return provider.resolveChatSessionPanel(panel, token ?? CancellationToken.None);
 			},
 		}, options?.webviewOptions));
 		return toDisposable(() => store.dispose());

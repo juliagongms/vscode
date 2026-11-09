@@ -5,8 +5,21 @@
 
 declare module 'vscode' {
 
-	// Push a suggested next message for one session's chat input. Core renders it as ghost
-	// text in every input bound to that session; Tab puts it in the box, never sends it.
+	// Push a suggested next message for one session. Core renders it as ghost text in every
+	// chat input bound to that session, and for an open question or plan review it marks the
+	// suggested options and shows the free-form part as ghost text in the answer box. Tab
+	// accepts; nothing is ever sent without the user.
+
+	export interface ChatInputSuggestionAnswer {
+		/** The open question (carousel) this answers. */
+		readonly questionId?: string;
+		/** The open plan review this answers. */
+		readonly reviewId?: string;
+		/** Option labels to mark as suggested (never pre-selected). */
+		readonly selectedOptions?: readonly string[];
+		/** Ghost text for the free-form answer or the review feedback. */
+		readonly freeform?: string;
+	}
 
 	export interface ChatInputSuggestion {
 		readonly id: string;
@@ -14,34 +27,46 @@ declare module 'vscode' {
 		readonly validForTurn?: string;
 		/** Ghost text for the chat input. */
 		readonly text?: string;
-		/** For an open question or plan review: the options to mark as suggested, and free-form text. */
-		readonly answer?: {
-			readonly questionId?: string;
-			readonly reviewId?: string;
-			readonly selectedOptions?: readonly string[];
-			readonly freeform?: string;
-		};
+		readonly answer?: ChatInputSuggestionAnswer;
 	}
 
-	export type ChatInputSuggestionState = 'shown' | 'hidden' | 'accepted' | 'partiallyAccepted' | 'rejected' | 'superseded' | 'invalidated';
+	export enum ChatInputSuggestionState {
+		Shown = 1,
+		Hidden = 2,
+		Accepted = 3,
+		PartiallyAccepted = 4,
+		Rejected = 5,
+		Superseded = 6,
+		Invalidated = 7
+	}
 
 	export interface ChatInputSuggestionEvent {
 		readonly id: string;
 		readonly session: Uri;
 		readonly state: ChatInputSuggestionState;
-		/** For `accepted` / `partiallyAccepted`: how many characters went into the input. */
+		/** For `Accepted` / `PartiallyAccepted`: how many characters went into the input. */
 		readonly acceptedChars?: number;
-		readonly host: ActiveChatSession['host'];
-		/** For `hidden` before it was ever shown: why (e.g. `userTypedFirst`). */
+		/** For an answer: the options the user picked when it was accepted. */
+		readonly selectedOptions?: readonly string[];
+		readonly host: ChatSessionHost;
+		/** For `Hidden` before it was ever shown: why (e.g. `userTypedFirst`). */
 		readonly reason?: string;
+	}
+
+	export enum ChatRequestSubmissionKind {
+		Send = 1,
+		Steer = 2,
+		Queue = 3,
+		Answer = 4,
+		PlanDecision = 5
 	}
 
 	export interface ChatRequestSubmission {
 		readonly session: Uri;
 		readonly requestId: string;
 		readonly text: string;
-		readonly kind: 'send' | 'steer' | 'queue' | 'answer' | 'planDecision';
-		readonly host: ActiveChatSession['host'];
+		readonly kind: ChatRequestSubmissionKind;
+		readonly host: ChatSessionHost;
 		/** Set by core when the submitted text came through accepting a suggestion. */
 		readonly fromSuggestion?: { readonly id: string; readonly acceptedChars: number };
 		/** Set by core when the submitted text came from a draft request. */
@@ -49,10 +74,10 @@ declare module 'vscode' {
 	}
 
 	export namespace chat {
-		/** Set (or clear, with `undefined`) the suggestion for a session's input. */
+		/** Set (or clear, with `undefined`) the suggestion for a session. */
 		export function setChatInputSuggestion(session: Uri, suggestion: ChatInputSuggestion | undefined): void;
 		export const onDidChangeChatInputSuggestion: Event<ChatInputSuggestionEvent>;
-		/** Every request the user submits to any session, in this window. */
-		export const onDidSubmitChatRequest: Event<ChatRequestSubmission>;
+		/** Every message, answer or plan decision the user sends to a session, in this window. */
+		export const onDidSendChatRequest: Event<ChatRequestSubmission>;
 	}
 }

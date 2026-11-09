@@ -5,7 +5,7 @@
 
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { Emitter } from '../../../../../base/common/event.js';
-import { Disposable, DisposableMap } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ResourceMap } from '../../../../../base/common/map.js';
 import { Schemas } from '../../../../../base/common/network.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -19,6 +19,7 @@ import { InlineCompletionsController } from '../../../../../editor/contrib/inlin
 import { ChatRequestQueueKind, IChatService } from '../../common/chatService/chatService.js';
 import { ActiveChatSessionHost, ChatInputSuggestionState, IChatDraftRequestService, IChatInputSuggestion, IChatInputSuggestionEvent, IChatInputSuggestionService, IChatRequestSubmission, IChatSessionObserverService } from '../../common/sessionObserver/chatSessionObserver.js';
 import { IChatWidget, IChatWidgetService } from '../chat.js';
+import { CHAT_QUESTION_ANSWER_SCHEME, getChatQuestionAnswerSessionResource } from '../widget/chatContentParts/chatQuestionAnswerEditor.js';
 import { chatInputInlineCompletionsSetting } from '../widget/input/editor/chatInputInlineSuggestions.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 
@@ -83,7 +84,7 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 			handleEndOfLifetime: (_list, item, reason) => this.onEnd(item, reason),
 			disposeInlineCompletions: () => { },
 		};
-		for (const scheme of [Schemas.vscodeChatInput, Schemas.sessionsChatInput]) {
+		for (const scheme of [Schemas.vscodeChatInput, Schemas.sessionsChatInput, CHAT_QUESTION_ANSWER_SCHEME]) {
 			this._register(languageFeaturesService.inlineCompletionsProvider.register({ scheme }, provider));
 		}
 
@@ -184,6 +185,61 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		return e ? { ...e.suggestion, owner: e.owner } : undefined;
 	}
 
+	private readonly answerSurfaces = new ResourceMap<number>();
+
+	claimAnswerSurface(session: URI): IDisposable {
+		this.answerSurfaces.set(session, (this.answerSurfaces.get(session) ?? 0) + 1);
+		return toDisposable(() => {
+			const n = (this.answerSurfaces.get(session) ?? 1) - 1;
+			if (n > 0) {
+				this.answerSurfaces.set(session, n);
+			} else {
+				this.answerSurfaces.delete(session);
+			}
+		});
+	}
+
+	reportAnswer(session: URI, answer: { readonly kind: 'answer' | 'planDecision'; readonly selected: readonly string[]; readonly text: string }): void {
+		const entry = this.entries.get(session);
+		const suggested = entry?.suggestion.answer;
+		const sameOptions = !!suggested?.selectedOptions?.length
+			&& suggested.selectedOptions.length === answer.selected.length && suggested.selectedOptions.every(o => answer.selected.includes(o));
+		const keptText = !!suggested?.freeform && !!answer.text && norm(answer.text).startsWith(norm(suggested.freeform).slice(0, 20));
+		const accepted = !!entry && !!suggested && (sameOptions || keptText);
+		if (entry && accepted && !entry.accepted) {
+			this.fire(session, entry, 'accepted', { acceptedChars: keptText ? suggested!.freeform!.length : 0, selectedOptions: answer.selected });
+		}
+		const text = [answer.selected.join(', '), answer.text].filter(Boolean).join(' — ');
+		// Linked when it matches the suggestion, or when its text was taken in (Tab) and then edited.
+		const linked = entry && (accepted || entry.accepted);
+		const acceptedChars = entry?.accepted?.chars ?? (keptText ? suggested!.freeform!.length : 0);
+		this._onDidSubmitRequest.fire({
+			session, requestId: generateUuid(), text, kind: answer.kind, host: this.hostFor(session),
+			...(linked ? { fromSuggestion: { id: entry.suggestion.id, owner: entry.owner, acceptedChars } } : {}),
+		});
+		if (entry) {
+			this.entries.delete(session);
+			this._onDidChangeSuggestions.fire(session);
+		}
+	}
+
+	reportAnswerInteraction(session: URI, state: 'shown' | 'accepted', acceptedChars?: number): void {
+		const e = this.entries.get(session);
+		if (!e?.suggestion.answer) {
+			return;
+		}
+		if (state === 'shown') {
+			if (!e.shown) {
+				e.shown = true;
+				this.fire(session, e, 'shown');
+			}
+			return;
+		}
+		const chars = acceptedChars ?? e.suggestion.answer.freeform?.length ?? 0;
+		e.accepted = { chars, text: e.suggestion.answer.freeform?.slice(0, chars) ?? '' };
+		this.fire(session, e, 'accepted', { acceptedChars: chars });
+	}
+
 	reportState(session: URI, id: string, state: ChatInputSuggestionState, host: ActiveChatSessionHost, details?: { acceptedChars?: number; reason?: string }): void {
 		const e = this.entries.get(session);
 		if (e && e.suggestion.id === id) {
@@ -191,19 +247,31 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		}
 	}
 
-	private fire(session: URI, e: IEntry, state: ChatInputSuggestionState, details?: { acceptedChars?: number; reason?: string }): void {
+	private fire(session: URI, e: IEntry, state: ChatInputSuggestionState, details?: { acceptedChars?: number; reason?: string; selectedOptions?: readonly string[] }): void {
 		this._onDidChangeSuggestionState.fire({ id: e.suggestion.id, session, owner: e.owner, state, host: this.hostFor(session), ...details });
 	}
 
 	private provide(model: ITextModel, position: Position, _context: InlineCompletionContext, _token: CancellationToken): ISuggestionList | undefined {
-		const widget = this.widgetFor(model);
-		const session = widget?.viewModel?.sessionResource;
-		// A session with no turn yet (a new-session composer) has nothing to reply to.
-		if (!session || !widget?.viewModel?.model.hasRequests) {
-			return undefined;
+		// The free-form answer box of an open question or plan review: its suggested words.
+		const answerSession = getChatQuestionAnswerSessionResource(model.uri);
+		let session: URI | undefined;
+		let text: string | undefined;
+		let entry: IEntry | undefined;
+		if (answerSession) {
+			session = answerSession;
+			entry = this.entries.get(session);
+			text = entry?.suggestion.answer?.freeform;
+		} else {
+			const widget = this.widgetFor(model);
+			session = widget?.viewModel?.sessionResource;
+			// A session with no turn yet (a new-session composer) has nothing to reply to.
+			if (!session || !widget?.viewModel?.model.hasRequests) {
+				return undefined;
+			}
+			entry = this.entries.get(session);
+			// While a question carousel or plan review shows, the answer goes there, not to the input.
+			text = entry && !(entry.suggestion.answer && this.answerSurfaces.has(session)) ? suggestionText(entry.suggestion) : undefined;
 		}
-		const entry = this.entries.get(session);
-		const text = entry ? suggestionText(entry.suggestion) : undefined;
 		if (!entry || !text) {
 			return undefined;
 		}

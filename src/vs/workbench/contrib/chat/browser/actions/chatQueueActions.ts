@@ -474,6 +474,64 @@ export class ChatDiscardDraftWithReasonAction extends Action2 {
 	}
 }
 
+/** The newest draft on the focused widget's session, with that widget. */
+function focusedDraft(accessor: ServicesAccessor): { widget: IChatWidget; id: string; text: string } | undefined {
+	const widget = accessor.get(IChatWidgetService).lastFocusedWidget;
+	const session = widget?.viewModel?.sessionResource;
+	const draft = session ? accessor.get(IChatDraftRequestService).getDrafts(session).at(-1) : undefined;
+	return widget && draft ? { widget, id: draft.id, text: draft.text } : undefined;
+}
+
+/** Draft keys act only from an empty, focused chat input with no ghost text or suggest widget showing. */
+const draftKeyWhen = ContextKeyExpr.and(
+	ChatContextKeys.inChatInput,
+	ChatContextKeys.hasDraftRequest,
+	ChatContextKeys.inputHasText.negate(),
+	ContextKeyExpr.not('inlineSuggestionVisible'),
+	ContextKeyExpr.not('suggestWidgetVisible'),
+	ChatContextKeys.currentlyEditing.negate(),
+	ChatContextKeys.currentlyEditingInput.negate(),
+);
+
+/** Tab takes the session's suggested draft into the input to edit; it is never sent for the user. */
+export class ChatTakeDraftIntoInputAction extends Action2 {
+	static readonly ID = 'workbench.action.chat.takeDraftIntoInput';
+	constructor() {
+		super({
+			id: ChatTakeDraftIntoInputAction.ID, title: localize2('chat.takeDraftIntoInput', "Edit Suggested Draft"), f1: false, category: CHAT_CATEGORY,
+			precondition: ChatContextKeys.hasDraftRequest,
+			keybinding: { primary: KeyCode.Tab, when: draftKeyWhen, weight: KeybindingWeight.WorkbenchContrib },
+		});
+	}
+	override run(accessor: ServicesAccessor): void {
+		const d = focusedDraft(accessor);
+		if (!d) {
+			return;
+		}
+		d.widget.setInput(d.text);
+		d.widget.focusInput();
+		accessor.get(IChatDraftRequestService).reportDraftState(d.id, 'editing', widgetHost(d.widget));
+	}
+}
+
+/** Escape in an empty chat input discards the session's suggested draft. */
+export class ChatDismissDraftAction extends Action2 {
+	static readonly ID = 'workbench.action.chat.dismissDraft';
+	constructor() {
+		super({
+			id: ChatDismissDraftAction.ID, title: localize2('chat.dismissDraft', "Discard Suggested Draft"), f1: false, category: CHAT_CATEGORY,
+			precondition: ChatContextKeys.hasDraftRequest,
+			keybinding: { primary: KeyCode.Escape, when: draftKeyWhen, weight: KeybindingWeight.WorkbenchContrib },
+		});
+	}
+	override run(accessor: ServicesAccessor): void {
+		const d = focusedDraft(accessor);
+		if (d) {
+			accessor.get(IChatDraftRequestService).resolveDraft(d.id, 'discarded', { reason: 'escape' });
+		}
+	}
+}
+
 function widgetHost(widget: IChatWidget): ActiveChatSessionHost {
 	const ctx = widget.viewContext as { viewId?: string; isQuickChat?: boolean };
 	return ctx.viewId ? 'chatView' : ctx.isQuickChat ? 'quickChat' : 'chatEditor';
@@ -485,6 +543,8 @@ export function registerChatQueueActions(): void {
 	registerAction2(ChatQueueDraftAction);
 	registerAction2(ChatDiscardDraftAction);
 	registerAction2(ChatDiscardDraftWithReasonAction);
+	registerAction2(ChatTakeDraftIntoInputAction);
+	registerAction2(ChatDismissDraftAction);
 	registerAction2(ChatQueueMessageAction);
 	registerAction2(ChatSteerWithMessageAction);
 	registerAction2(ChatAskInSideChatAction);

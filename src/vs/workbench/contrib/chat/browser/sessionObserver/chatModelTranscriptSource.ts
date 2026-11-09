@@ -5,6 +5,7 @@
 
 import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
+import { hash } from '../../../../../base/common/hash.js';
 import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Disposable, DisposableMap, DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -30,14 +31,25 @@ function lines(s: string): number {
  */
 export class ChatModelProjector {
 	private readonly emitted = new Set<string>();
-	private lastPending = '';
+	private lastPending = '[]';
 	private lastTodos = '';
 
+	/**
+	 * @param options.indexIds Key turns by their index, parts by their position and text by its
+	 * content, for a session whose model is reloaded from its provider: request and tool call IDs
+	 * may be minted anew on each load, so they can't dedupe what an earlier load already emitted.
+	 */
 	constructor(
-		private readonly model: IChatModel,
+		private model: IChatModel,
 		private readonly sink: IChatSessionTranscriptSink,
 		private readonly todos: () => readonly { id: string; title: string; status: 'not-started' | 'in-progress' | 'completed' }[],
+		private readonly options: { readonly indexIds?: boolean } = {},
 	) { }
+
+	/** Projects a reloaded model of the same session; what was emitted stays emitted. */
+	setModel(model: IChatModel): void {
+		this.model = model;
+	}
 
 	get status(): ChatSessionObservedStatus {
 		if (this.model.requestNeedsInput.get()) {
@@ -52,9 +64,7 @@ export class ChatModelProjector {
 
 	flush(): void {
 		const out: IChatSessionEventInput[] = [];
-		for (const request of this.model.getRequests()) {
-			this.projectRequest(request, out);
-		}
+		this.model.getRequests().forEach((request, index) => this.projectRequest(request, index, out));
 		this.projectPending(out);
 		this.projectTodos(out);
 		if (out.length) {
@@ -78,8 +88,8 @@ export class ChatModelProjector {
 		}
 	}
 
-	private projectRequest(r: IChatRequestModel, out: IChatSessionEventInput[]): void {
-		const turnId = `req:${r.id}`;
+	private projectRequest(r: IChatRequestModel, index: number, out: IChatSessionEventInput[]): void {
+		const turnId = this.options.indexIds ? `t:${index}` : `req:${r.id}`;
 		const at = r.timestamp;
 		this.once(`${turnId}:start`, () => {
 			const origin = r.isSystemInitiated ? 'system' : 'user';
@@ -113,7 +123,7 @@ export class ChatModelProjector {
 		let md = '';
 		const closeMarkdown = (index: number) => {
 			if (mdStart >= 0 && md.trim()) {
-				const key = `md:${turnId}:${mdStart}`;
+				const key = this.options.indexIds ? `md:${turnId}:${hash(md)}` : `md:${turnId}:${mdStart}`;
 				this.once(key, () => out.push({ id: key, at: response.completedAt ?? Date.now(), turnId, kind: 'agentText', text: md, final: true }));
 			}
 			mdStart = -1;
@@ -142,7 +152,7 @@ export class ChatModelProjector {
 				}
 				case 'toolInvocation':
 				case 'toolInvocationSerialized':
-					this.projectTool(part, turnId, out);
+					this.projectTool(part, turnId, out, this.options.indexIds ? `${turnId}:${i}` : undefined);
 					break;
 				case 'textEditGroup': {
 					if (part.done || done) {
@@ -156,7 +166,7 @@ export class ChatModelProjector {
 					break;
 				}
 				case 'questionCarousel': {
-					const qid = part.resolveId ?? `${turnId}:${i}`;
+					const qid = (this.options.indexIds ? undefined : part.resolveId) ?? `${turnId}:${i}`;
 					this.once(`q:${qid}`, () => out.push({
 						id: `q:${qid}`, at, turnId, kind: 'question', questionId: qid,
 						questions: part.questions.map(q => ({ text: q.title || text(q.message), kind: q.type === 'singleSelect' ? 'single' as const : q.type === 'multiSelect' ? 'multi' as const : 'text' as const, ...(q.options?.length ? { options: q.options.map(o => o.label) } : {}) })),
@@ -177,7 +187,7 @@ export class ChatModelProjector {
 					break;
 				}
 				case 'planReview': {
-					const rid = part.resolveId ?? `${turnId}:${i}`;
+					const rid = (this.options.indexIds ? undefined : part.resolveId) ?? `${turnId}:${i}`;
 					this.once(`p:${rid}`, () => out.push({ id: `p:${rid}`, at, turnId, kind: 'planReview', reviewId: rid, title: part.title, plan: part.content, ...(part.planUri ? { planUri: URI.revive(part.planUri) } : {}), actions: part.actions.map(a => a.label), canProvideFeedback: part.canProvideFeedback }));
 					if (part.data) {
 						const d = part.data as { action?: string; feedback?: string };
@@ -226,8 +236,8 @@ export class ChatModelProjector {
 		}
 	}
 
-	private projectTool(part: IChatToolInvocation | IChatToolInvocationSerialized, turnId: string, out: IChatSessionEventInput[]): void {
-		const callId = part.toolCallId;
+	private projectTool(part: IChatToolInvocation | IChatToolInvocationSerialized, turnId: string, out: IChatSessionEventInput[], stableCallId?: string): void {
+		const callId = stableCallId ?? part.toolCallId;
 		const nest = part.subAgentInvocationId ? { parentId: `sa:${part.subAgentInvocationId}` } : {};
 		const started = (part.kind === 'toolInvocation' ? part.startedAt : undefined) ?? Date.now();
 		const complete = IChatToolInvocation.isComplete(part);

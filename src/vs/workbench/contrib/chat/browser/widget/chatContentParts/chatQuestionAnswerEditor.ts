@@ -17,6 +17,7 @@ import { CodeEditorWidget } from '../../../../../../editor/browser/widget/codeEd
 import { ITextModel } from '../../../../../../editor/common/model.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { PlaceholderTextContribution } from '../../../../../../editor/contrib/placeholderText/browser/placeholderTextContribution.js';
+import { InlineCompletionsController } from '../../../../../../editor/contrib/inlineCompletions/browser/controller/inlineCompletionsController.js';
 import { Context as SuggestContext } from '../../../../../../editor/contrib/suggest/browser/suggest.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
@@ -113,6 +114,19 @@ export class ChatQuestionAnswerEditor extends Disposable {
 		}
 	}
 
+	/**
+	 * Shows a pushed suggestion (proposed API `chatInputSuggestion`) as ghost text: inline
+	 * suggestions stay off in answer boxes unless one is offered, and Tab accepts it.
+	 */
+	enableSuggestions(): void {
+		this._editor.updateOptions({ inlineSuggest: { enabled: true } });
+		const trigger = () => InlineCompletionsController.get(this._editor)?.model.get()?.trigger();
+		this._register(this._editor.onDidFocusEditorText(trigger));
+		if (this._editor.hasTextFocus()) {
+			trigger();
+		}
+	}
+
 	/** Current height of the editor area in pixels. */
 	get height(): number {
 		return this._height;
@@ -156,6 +170,7 @@ export class ChatQuestionAnswerEditor extends Disposable {
 			fontSize: FONT_SIZE,
 			lineHeight: LINE_HEIGHT,
 			quickSuggestions: false,
+			inlineSuggest: { enabled: false },
 			suggest: {
 				showIcons: true,
 				showSnippets: false,
@@ -166,7 +181,7 @@ export class ChatQuestionAnswerEditor extends Disposable {
 			bracketPairColorization: { enabled: false },
 		};
 		const widgetOptions = getSimpleCodeEditorWidgetOptions();
-		widgetOptions.contributions?.push(...EditorExtensionsRegistry.getSomeEditorContributions([PlaceholderTextContribution.ID]));
+		widgetOptions.contributions?.push(...EditorExtensionsRegistry.getSomeEditorContributions([PlaceholderTextContribution.ID, InlineCompletionsController.ID]));
 
 		this._editor = this._register(instantiationService.createInstance(CodeEditorWidget, this._editorElement, editorOptions, widgetOptions));
 		this._editor.setModel(this._model);

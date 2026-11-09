@@ -1787,9 +1787,9 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'chatInputSuggestion');
 				return _asExtensionEvent(extHostChatSessionObserver.onDidChangeChatInputSuggestion)(listener, thisArgs, disposables);
 			},
-			onDidSubmitChatRequest: (listener, thisArgs?, disposables?) => {
+			onDidSendChatRequest: (listener, thisArgs?, disposables?) => {
 				checkProposedApiEnabled(extension, 'chatInputSuggestion');
-				return _asExtensionEvent(extHostChatSessionObserver.onDidSubmitChatRequest)(listener, thisArgs, disposables);
+				return _asExtensionEvent(extHostChatSessionObserver.onDidSendChatRequest)(listener, thisArgs, disposables);
 			},
 			addChatDraftRequest(session: vscode.Uri, draft: vscode.ChatDraftRequest) {
 				checkProposedApiEnabled(extension, 'chatDraftRequests');
@@ -2351,6 +2351,37 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			ChatToolInvocationPart: extHostTypes.ChatToolInvocationPart,
 			ChatLocation: extHostTypes.ChatLocation,
 			ChatSessionStatus: extHostTypes.ChatSessionStatus,
+			ChatSessionObservedStatus: extHostTypes.ChatSessionObservedStatus,
+			ChatSessionReasoningFidelity: extHostTypes.ChatSessionReasoningFidelity,
+			ChatSessionToolOutputFidelity: extHostTypes.ChatSessionToolOutputFidelity,
+			ChatSessionDiffFidelity: extHostTypes.ChatSessionDiffFidelity,
+			ChatSessionTimestampFidelity: extHostTypes.ChatSessionTimestampFidelity,
+			ChatSessionAttachmentKind: extHostTypes.ChatSessionAttachmentKind,
+			ChatSessionEventKind: extHostTypes.ChatSessionEventKind,
+			ChatSessionTurnTrigger: extHostTypes.ChatSessionTurnTrigger,
+			ChatSessionMessageOrigin: extHostTypes.ChatSessionMessageOrigin,
+			ChatSessionSubmitKind: extHostTypes.ChatSessionSubmitKind,
+			ChatSessionReasoningAvailability: extHostTypes.ChatSessionReasoningAvailability,
+			ChatSessionToolOutputStream: extHostTypes.ChatSessionToolOutputStream,
+			ChatSessionToolResultStatus: extHostTypes.ChatSessionToolResultStatus,
+			ChatSessionEditOperation: extHostTypes.ChatSessionEditOperation,
+			ChatSessionEditDecision: extHostTypes.ChatSessionEditDecision,
+			ChatSessionQuestionKind: extHostTypes.ChatSessionQuestionKind,
+			ChatSessionAnswerActor: extHostTypes.ChatSessionAnswerActor,
+			ChatSessionPermissionDecision: extHostTypes.ChatSessionPermissionDecision,
+			ChatSessionTodoStatus: extHostTypes.ChatSessionTodoStatus,
+			ChatSessionSubagentStatus: extHostTypes.ChatSessionSubagentStatus,
+			ChatSessionCompactionTrigger: extHostTypes.ChatSessionCompactionTrigger,
+			ChatSessionPullRequestAction: extHostTypes.ChatSessionPullRequestAction,
+			ChatSessionTurnOutcome: extHostTypes.ChatSessionTurnOutcome,
+			ChatSessionCanceller: extHostTypes.ChatSessionCanceller,
+			ChatSessionPendingKind: extHostTypes.ChatSessionPendingKind,
+			ChatSessionHost: extHostTypes.ChatSessionHost,
+			ChatSessionWindowKind: extHostTypes.ChatSessionWindowKind,
+			ChatInputSuggestionState: extHostTypes.ChatInputSuggestionState,
+			ChatRequestSubmissionKind: extHostTypes.ChatRequestSubmissionKind,
+			ChatDraftRequestState: extHostTypes.ChatDraftRequestState,
+			ChatDraftRequestOutcome: extHostTypes.ChatDraftRequestOutcome,
 			ChatSessionCustomizationType: extHostTypes.ChatSessionCustomizationType,
 			ChatDebugLogLevel: extHostTypes.ChatDebugLogLevel,
 			ChatDebugToolCallResult: extHostTypes.ChatDebugToolCallResult,

@@ -22,6 +22,7 @@ import { Button } from '../../../../../../base/browser/ui/button/button.js';
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { Checkbox } from '../../../../../../base/browser/ui/toggle/toggle.js';
 import { IChatQuestion, IChatQuestionCarousel, IChatQuestionAnswerValue, IChatQuestionValidation, IChatSingleSelectAnswer, IChatMultiSelectAnswer } from '../../../common/chatService/chatService.js';
+import { IChatInputSuggestion, IChatInputSuggestionService } from '../../../common/sessionObserver/chatSessionObserver.js';
 import { findQuestionValidationFailure, getDisplayedQuestionText, getOptionsWithDefaultsFirst } from '../../../common/chatService/chatQuestionCarouselHelpers.js';
 import { ChatQuestionCarouselData } from '../../../common/model/chatProgressTypes/chatQuestionCarouselData.js';
 import { IChatContentPart, IChatContentPartRenderContext } from './chatContentParts.js';
@@ -191,6 +192,10 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 	private _isSkipped = false;
 
+	/** Pushed answer suggestions (proposed API `chatInputSuggestion`), when the service exists. */
+	private readonly _suggestions: IChatInputSuggestionService | undefined;
+	private readonly _answerClaim = this._register(new MutableDisposable());
+
 	private readonly _textAnswerEditors: Map<string, ChatQuestionAnswerEditor> = new Map();
 	private readonly _singleSelectItems: Map<string, { items: HTMLElement[]; selectedIndex: number; optionIndices: number[] }> = new Map();
 	private readonly _multiSelectCheckboxes: Map<string, { checkboxes: Checkbox[]; optionIndices: number[] }> = new Map();
@@ -244,6 +249,18 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			this._chatQuestionCarouselHasTerminalContextKey.reset();
 		}));
 		this._register({ dispose: () => { this._inChatQuestionCarouselContextKey.reset(); this._chatQuestionCarouselHasTerminalContextKey.reset(); } });
+
+		this._suggestions = this.resolveSuggestionService();
+		const session = this.sessionResource;
+		if (this._suggestions && session && !carousel.isUsed) {
+			this._answerClaim.value = this._suggestions.claimAnswerSurface(session);
+			this._register(this._suggestions.onDidChangeSuggestions(uri => {
+				if (uri.toString() === session.toString() && this._answerClaim.value && !this.carousel.isUsed) {
+					this.saveCurrentAnswer();
+					this.renderCurrentQuestion();
+				}
+			}));
+		}
 
 		// Set up accessibility attributes for the carousel container
 		this.domNode.tabIndex = 0;
@@ -578,6 +595,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			if (!this.validateRequiredFields()) {
 				return;
 			}
+			this.reportAnswer(this._answers);
 			this._options.onSubmit(this._answers);
 			this.hideAndShowSummary();
 		}
@@ -594,6 +612,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		if (!this.validateRequiredFields()) {
 			return;
 		}
+		this.reportAnswer(this._answers);
 		this._options.onSubmit(this._answers);
 		this.hideAndShowSummary();
 	}
@@ -624,6 +643,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		}
 
 		this._isSkipped = true;
+		this._answerClaim.clear();
 		this.domNode.classList.add('chat-question-carousel-used');
 
 		// Dispose interactive UI and clear DOM
@@ -1423,6 +1443,69 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		}
 	}
 
+	private resolveSuggestionService(): IChatInputSuggestionService | undefined {
+		try {
+			return this._instantiationService.invokeFunction(accessor => accessor.get(IChatInputSuggestionService));
+		} catch {
+			return undefined;
+		}
+	}
+
+	private get sessionResource(): URI | undefined {
+		return this._options.sessionResource ?? this._context?.element?.sessionResource;
+	}
+
+	/** The suggested answer for this carousel's session, while the carousel takes answers. */
+	private get suggestedAnswer(): IChatInputSuggestion['answer'] | undefined {
+		const session = this.sessionResource;
+		return session && this._answerClaim.value ? this._suggestions?.getSuggestion(session)?.answer : undefined;
+	}
+
+	/** Marks an option the suggestion picked: a sparkle and an outline, never pre-selected. */
+	private markSuggestedOption(listItem: HTMLElement, label: string): void {
+		const suggested = this.suggestedAnswer?.selectedOptions;
+		if (suggested?.some(o => o === label || label.startsWith(`${o} - `))) {
+			listItem.classList.add('chat-question-list-item-suggested');
+			const marker = dom.$('span.chat-question-suggested-marker' + ThemeIcon.asCSSSelector(Codicon.sparkle));
+			marker.title = localize('chat.questionCarousel.suggested', "Suggested");
+			listItem.appendChild(marker);
+			const current = listItem.getAttribute('aria-label') ?? label;
+			listItem.setAttribute('aria-label', localize('chat.questionCarousel.suggestedAria', "{0} (suggested)", current));
+			this._suggestions?.reportAnswerInteraction(this.sessionResource!, 'shown');
+		}
+	}
+
+	/** Reports the submitted answer, so a suggestion it matches counts as accepted. */
+	private reportAnswer(answers: ReadonlyMap<string, IChatQuestionAnswerValue>): void {
+		const session = this.sessionResource;
+		if (!this._suggestions || !session) {
+			return;
+		}
+		const selected: string[] = [];
+		const texts: string[] = [];
+		for (const question of this.carousel.questions) {
+			const value = answers.get(question.id);
+			const labelOf = (v: string) => question.options?.find(o => o.value === v || o.id === v)?.label ?? v;
+			if (typeof value === 'string') {
+				texts.push(value);
+			} else if (value && hasKey(value, { selectedValues: true })) {
+				selected.push(...value.selectedValues.map(labelOf));
+				if (value.freeformValue) {
+					texts.push(value.freeformValue);
+				}
+			} else if (value) {
+				if (value.selectedValue) {
+					selected.push(labelOf(value.selectedValue));
+				}
+				if (value.freeformValue) {
+					texts.push(value.freeformValue);
+				}
+			}
+		}
+		this._answerClaim.clear();
+		this._suggestions.reportAnswer(session, { kind: 'answer', selected, text: texts.join('\n') });
+	}
+
 	/**
 	 * Creates an answer editor in the container, tied to the lifetime of the rendered question.
 	 */
@@ -1437,6 +1520,9 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		}));
 		this._inputBoxes.add(editor.onDidChangeHeight(() => this._onDidChangeHeight.fire()));
 		this._inputBoxes.add(editor.onDidPressEnter(() => this.handleNextOrSubmit()));
+		if (this.suggestedAnswer?.freeform) {
+			editor.enableSuggestions();
+		}
 		return editor;
 	}
 
@@ -1559,6 +1645,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			}
 			listItem.appendChild(label);
 			listItem.appendChild(indicator);
+			this.markSuggestedOption(listItem, option.label);
 
 			// if we select an option, clear text and go to next question
 			this._inputBoxes.add(dom.addDisposableListener(listItem, dom.EventType.CLICK, (e: MouseEvent) => {
@@ -1741,6 +1828,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 				label.textContent = option.label;
 			}
 			listItem.appendChild(label);
+			this.markSuggestedOption(listItem, option.label);
 
 			if (isChecked) {
 				listItem.classList.add('checked');

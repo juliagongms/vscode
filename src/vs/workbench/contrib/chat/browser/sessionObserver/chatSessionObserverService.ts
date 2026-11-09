@@ -20,7 +20,9 @@ import { IAgentSession } from '../agentSessions/agentSessionsModel.js';
 import { IAgentSessionsService } from '../agentSessions/agentSessionsService.js';
 import { IChatWidget, IChatWidgetService, isIChatResourceViewContext, isIChatViewViewContext } from '../chat.js';
 import { COPILOT_CLI_EH_SCHEME, COPILOT_CLI_LOCAL_AH_SCHEME } from '../copilotCliEventsUri.js';
+import { AgentHostTranscriptSource } from './agentHostTranscriptSource.js';
 import { ChatModelTranscriptSource } from './chatModelTranscriptSource.js';
+import { CloudSessionTranscriptSource } from './cloudSessionTranscriptSource.js';
 import { CopilotCliTranscriptSource } from './copilotCliTranscriptSource.js';
 
 const DAY = 86_400_000;
@@ -167,7 +169,9 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 	) {
 		super();
 		this._register(this.registerSource(this._register(instantiationService.createInstance(CopilotCliTranscriptSource))));
+		this._register(this.registerSource(this._register(instantiationService.createInstance(AgentHostTranscriptSource))));
 		this._register(this.registerSource(this._register(instantiationService.createInstance(ChatModelTranscriptSource))));
+		this._register(this.registerSource(this._register(instantiationService.createInstance(CloudSessionTranscriptSource))));
 
 		this._register(this.chatWidgetService.onDidAddWidget(() => this.updateActive()));
 		this._register(this.chatWidgetService.onDidChangeFocusedWidget(() => this.updateActive()));

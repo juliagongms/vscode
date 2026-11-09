@@ -6,14 +6,19 @@
 declare module 'vscode' {
 
 	// A webview panel that lives beside the active chat session: stacked with the Chat view in
-	// editor windows, in the side pane next to the focused session in the Agents Window.
-	// Contributed with `contributes.chatSessionPanels: [{ id, title, icon }]`.
+	// editor windows, and a side-pane tab with a Session Activity Bar entry in the Agents
+	// Window. Contributed with `contributes.chatSessionPanels: [{ id, title, icon }]`.
+
+	export interface ChatSessionPanel {
+		readonly webviewView: WebviewView;
+		/** The session the panel shows: the one the user focused last in this window. */
+		readonly session: Uri | undefined;
+		readonly onDidChangeSession: Event<Uri | undefined>;
+	}
 
 	export interface ChatSessionPanelProvider {
-		/** Called once, when the panel is first shown; `session` is the session it shows. */
-		resolveChatSessionPanel(panel: WebviewView, session: Uri | undefined, token: CancellationToken): void | Thenable<void>;
-		/** The panel now follows another session (focus moved). */
-		onDidChangeChatSessionPanelSession?(panel: WebviewView, session: Uri | undefined): void;
+		/** Called when the panel is first shown. */
+		resolveChatSessionPanel(panel: ChatSessionPanel, token: CancellationToken): void | Thenable<void>;
 	}
 
 	export namespace window {
