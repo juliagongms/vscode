@@ -12,6 +12,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { Position } from '../../../../../editor/common/core/position.js';
 import { Range } from '../../../../../editor/common/core/range.js';
+import { EditorOption } from '../../../../../editor/common/config/editorOptions.js';
 import { InlineCompletion, InlineCompletionContext, InlineCompletionEndOfLifeReason, InlineCompletionEndOfLifeReasonKind, InlineCompletions, InlineCompletionsProvider } from '../../../../../editor/common/languages.js';
 import { ITextModel } from '../../../../../editor/common/model.js';
 import { ILanguageFeaturesService } from '../../../../../editor/common/services/languageFeatures.js';
@@ -22,6 +23,9 @@ import { IChatWidget, IChatWidgetService } from '../chat.js';
 import { CHAT_QUESTION_ANSWER_SCHEME, getChatQuestionAnswerSessionResource } from '../widget/chatContentParts/chatQuestionAnswerEditor.js';
 import { chatInputInlineCompletionsSetting } from '../widget/input/editor/chatInputInlineSuggestions.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+
+/** An editor placeholder that renders nothing, set while a pushed suggestion shows. */
+const HIDDEN_PLACEHOLDER = ' ';
 
 interface IEntry {
 	readonly owner: string;
@@ -145,6 +149,34 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		for (const w of this.chatWidgetService.getAllWidgets()) {
 			if (w.viewModel?.sessionResource.toString() === session.toString()) {
 				w.inputEditor.updateOptions({ inlineSuggest: { enabled } });
+			}
+		}
+		this.markShown(session, false);
+	}
+
+	/** The placeholder each input had before a suggestion showed in it. */
+	private readonly hiddenPlaceholders = new WeakMap<IChatWidget, string>();
+
+	/**
+	 * While a suggestion shows as ghost text in a session's inputs, their placeholder (it would trail
+	 * the ghost text) gives way: an editor placeholder of one space renders nothing, and the chat
+	 * input's own placeholder decoration yields to any editor placeholder, as it does to dictation's.
+	 */
+	private markShown(session: URI, shown: boolean): void {
+		for (const w of this.chatWidgetService.getAllWidgets()) {
+			if (w.viewModel?.sessionResource.toString() !== session.toString()) {
+				continue;
+			}
+			const editor = w.inputEditor;
+			if (shown && !this.hiddenPlaceholders.has(w)) {
+				this.hiddenPlaceholders.set(w, editor.getOption(EditorOption.placeholder) ?? '');
+				editor.updateOptions({ placeholder: HIDDEN_PLACEHOLDER });
+			} else if (!shown && this.hiddenPlaceholders.has(w)) {
+				const previous = this.hiddenPlaceholders.get(w)!;
+				this.hiddenPlaceholders.delete(w);
+				if (editor.getOption(EditorOption.placeholder) === HIDDEN_PLACEHOLDER) {
+					editor.updateOptions({ placeholder: previous });
+				}
 			}
 		}
 	}
@@ -299,6 +331,9 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 	}
 
 	private onShown(item: ISuggestionItem): void {
+		if (!getChatQuestionAnswerSessionResource(item.session) && this.entries.has(item.session)) {
+			this.markShown(item.session, true);
+		}
 		const e = this.entries.get(item.session);
 		if (e && e.suggestion.id === item.suggestionId && !e.shown) {
 			e.shown = true;
@@ -319,6 +354,9 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		const e = this.entries.get(item.session);
 		if (!e || e.suggestion.id !== item.suggestionId) {
 			return;
+		}
+		if (reason.kind !== InlineCompletionEndOfLifeReasonKind.Ignored) {
+			this.markShown(item.session, false);
 		}
 		if (reason.kind === InlineCompletionEndOfLifeReasonKind.Accepted) {
 			this.onAccepted(item, suggestionText(e.suggestion).length - item.prefixLength, false);
