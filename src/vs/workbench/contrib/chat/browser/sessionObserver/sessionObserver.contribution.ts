@@ -18,6 +18,7 @@ import { ExtensionsRegistry } from '../../../../services/extensions/common/exten
 import { WebviewViewPane } from '../../../webviewView/browser/webviewViewPane.js';
 import { chatSessionPanelRegistry, IChatDraftRequestService, IChatInputSuggestionService, IChatSessionObserverService } from '../../common/sessionObserver/chatSessionObserver.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
+import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
 import { ChatViewContainerId, IChatWidget, IChatWidgetService } from '../chat.js';
 import { ChatDraftRequestService } from './chatDraftRequestService.js';
 import { ChatInputSuggestionService } from './chatInputSuggestionService.js';
@@ -33,6 +34,7 @@ interface IChatSessionPanelContribution {
 	readonly id: string;
 	readonly title: string;
 	readonly icon?: string;
+	readonly when?: string;
 }
 
 const chatSessionPanelsExtensionPoint = ExtensionsRegistry.registerExtensionPoint<IChatSessionPanelContribution[]>({
@@ -48,6 +50,7 @@ const chatSessionPanelsExtensionPoint = ExtensionsRegistry.registerExtensionPoin
 				id: { type: 'string', description: localize('chatSessionPanels.id', "The panel id; also the id passed to `registerChatSessionPanelProvider`.") },
 				title: { type: 'string', description: localize('chatSessionPanels.title', "The panel title.") },
 				icon: { type: 'string', description: localize('chatSessionPanels.icon', "A codicon id, e.g. `pulse`.") },
+				when: { type: 'string', description: localize('chatSessionPanels.when', "In editor windows, a condition for showing the panel as a view beside the chat, as for any view. The Agents Window always offers the panel as a side-pane tab.") },
 			},
 		},
 	},
@@ -103,6 +106,7 @@ class ChatSessionPanelsContribution extends Disposable implements IWorkbenchCont
 						extensionId: ext.description.identifier,
 						originalContainerId: container.id,
 						windowEnablement: WindowEnablement.Editor,
+						...(c.when ? { when: ContextKeyExpr.deserialize(c.when) } : {}),
 					};
 					viewsRegistry.registerViews([descriptor], container);
 					this.registered.set(c.id, { dispose: () => viewsRegistry.deregisterViews([descriptor], container) });
