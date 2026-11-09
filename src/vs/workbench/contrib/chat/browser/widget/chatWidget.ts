@@ -82,6 +82,7 @@ import { IChatTodoListService } from '../../common/tools/chatTodoListService.js'
 import { recoverAttachmentMentions } from '../../common/attachments/chatInlineAttachments.js';
 import { ChatRequestVariableSet, ChatSessionReferenceVariableId, IChatRequestTranscriptContextVariableEntry, IChatRequestVariableEntry, isPastedTextArtifact, isPromptFileVariableEntry, isPromptTextVariableEntry, isWorkspaceVariableEntry, PromptFileVariableKind, toPromptFileVariableEntry } from '../../common/attachments/chatVariableEntries.js';
 import { ChatViewModel, IChatResponseViewModel, IChatViewModelChangeEvent, isRequestVM, isResponseVM } from '../../common/model/chatViewModel.js';
+import { IChatDraftRequestService } from '../../common/sessionObserver/chatSessionObserver.js';
 import { ChatMessageRole, IChatMessage } from '../../common/languageModels.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, ChatPermissionLevel, CONTINUE_CHAT_IN_COPILOT_ACTION_ID, getAgentHostSessionResource, IResolvedNewChatSessionType, isLocalChatSessionSubjectToManagedPolicy, managedPolicyRequiresAgentHostMessage, ThinkingDisplayMode } from '../../common/constants.js';
 import { IManagedSettingsService, requiresCopilotAgentHost } from '../../../../../platform/policy/common/copilotManagedSettings.js';
@@ -486,6 +487,35 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 	private readonly _visible = observableValue(this, false);
 	get visible() { return this._visible.get(); }
+
+	/** Suggested drafts for this session (proposed API `chatDraftRequests`): shown in the pending list, reported as shown while visible. */
+	private bindDraftRequests(viewModel: ChatViewModel, session: URI): void {
+		let drafts: IChatDraftRequestService | undefined;
+		try {
+			drafts = this.instantiationService.invokeFunction(accessor => accessor.get(IChatDraftRequestService));
+		} catch {
+			return;
+		}
+		viewModel.setDraftSource(drafts);
+		const host = this.viewOptions.isSessionsWindow ? 'agentsWindow' : isIChatViewViewContext(this.viewContext) ? 'chatView' : isIChatResourceViewContext(this.viewContext) && this.viewContext.isQuickChat ? 'quickChat' : 'chatEditor';
+		const report = () => {
+			if (this._visible.get()) {
+				for (const d of drafts.getDrafts(session)) {
+					drafts.reportDraftState(d.id, 'shown', host);
+				}
+			}
+		};
+		this.viewModelDisposables.add(drafts.onDidChangeDrafts(uri => {
+			if (uri.toString() === session.toString()) {
+				report();
+			}
+		}));
+		this.viewModelDisposables.add(autorun(reader => {
+			if (this._visible.read(reader)) {
+				report();
+			}
+		}));
+	}
 
 	private _inputVisible = true;
 	private _readOnly = false;
@@ -3236,6 +3266,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		this.inputPart.setInputModel(model.inputModel, model.getRequests().length === 0, model.sessionResource);
 
 		this.viewModel = this.instantiationService.createInstance(ChatViewModel, model, undefined);
+		this.bindDraftRequests(this.viewModel, model.sessionResource);
 		const archived = this.observeSessionArchived(model);
 		if (!this.viewOptions.isSessionsWindow) {
 			this.viewModelDisposables.add(autorun(reader => this.updateReadOnlyState(model, archived.read(reader), reader)));

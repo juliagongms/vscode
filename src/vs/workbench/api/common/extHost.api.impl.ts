@@ -41,6 +41,7 @@ import { ExtHostChatAgents2 } from './extHostChatAgents2.js';
 import { ExtHostChatArtifactIntegrations } from './extHostChatArtifactIntegrations.js';
 import { ExtHostChatOutputRenderer } from './extHostChatOutputRenderer.js';
 import { ExtHostChatSessions } from './extHostChatSessions.js';
+import { ExtHostChatSessionObserver } from './extHostChatSessionObserver.js';
 import { ExtHostChatStatus } from './extHostChatStatus.js';
 import { ExtHostChatQuota } from './extHostChatQuota.js';
 import { ExtHostChatInputNotification } from './extHostChatInputNotification.js';
@@ -251,6 +252,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 	const extHostWebviewPanels = rpcProtocol.set(ExtHostContext.ExtHostWebviewPanels, new ExtHostWebviewPanels(rpcProtocol, extHostWebviews, extHostWorkspace));
 	const extHostCustomEditors = rpcProtocol.set(ExtHostContext.ExtHostCustomEditors, new ExtHostCustomEditors(rpcProtocol, extHostDocuments, extensionStoragePaths, extHostWebviews, extHostWebviewPanels));
 	const extHostWebviewViews = rpcProtocol.set(ExtHostContext.ExtHostWebviewViews, new ExtHostWebviewViews(rpcProtocol, extHostWebviews));
+	const extHostChatSessionObserver = rpcProtocol.set(ExtHostContext.ExtHostChatSessionObserver, new ExtHostChatSessionObserver(rpcProtocol, extHostWebviewViews));
 	const extHostTesting = rpcProtocol.set(ExtHostContext.ExtHostTesting, accessor.get(IExtHostTesting));
 	const extHostUriOpeners = rpcProtocol.set(ExtHostContext.ExtHostUriOpeners, new ExtHostUriOpeners(rpcProtocol));
 	const extHostProfileContentHandlers = rpcProtocol.set(ExtHostContext.ExtHostProfileContentHandlers, new ExtHostProfileContentHandlers(rpcProtocol));
@@ -1037,6 +1039,10 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			}) {
 				return extHostWebviewViews.registerWebviewViewProvider(extension, viewId, provider, options?.webviewOptions);
 			},
+			registerChatSessionPanelProvider(id: string, provider: vscode.ChatSessionPanelProvider, options?: { readonly webviewOptions?: { readonly retainContextWhenHidden?: boolean } }) {
+				checkProposedApiEnabled(extension, 'chatSessionPanel');
+				return extHostChatSessionObserver.registerChatSessionPanelProvider(extension, id, provider, options);
+			},
 			get activeNotebookEditor(): vscode.NotebookEditor | undefined {
 				return extHostNotebook.activeNotebookEditor;
 			},
@@ -1741,6 +1747,54 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 
 		// namespace: chatregisterMcpServerDefinitionProvider
 		const chat: typeof vscode.chat = {
+			getChatSessions(filter?: { readonly activeSince?: number }) {
+				checkProposedApiEnabled(extension, 'chatSessionObserver');
+				return extHostChatSessionObserver.getChatSessions(filter);
+			},
+			onDidChangeChatSessions: (listener, thisArgs?, disposables?) => {
+				checkProposedApiEnabled(extension, 'chatSessionObserver');
+				return _asExtensionEvent(extHostChatSessionObserver.onDidChangeChatSessions)(listener, thisArgs, disposables);
+			},
+			observeChatSession(resource: vscode.Uri, options?: { readonly fromSeq?: number }) {
+				checkProposedApiEnabled(extension, 'chatSessionObserver');
+				return extHostChatSessionObserver.observeChatSession(resource, options);
+			},
+			get activeChatSessions() {
+				checkProposedApiEnabled(extension, 'chatSessionObserver');
+				return extHostChatSessionObserver.activeChatSessions;
+			},
+			onDidChangeActiveChatSessions: (listener, thisArgs?, disposables?) => {
+				checkProposedApiEnabled(extension, 'chatSessionObserver');
+				return _asExtensionEvent(extHostChatSessionObserver.onDidChangeActiveChatSessions)(listener, thisArgs, disposables);
+			},
+			openChatSession(resource: vscode.Uri) {
+				checkProposedApiEnabled(extension, 'chatSessionObserver');
+				return extHostChatSessionObserver.openChatSession(resource);
+			},
+			revealChatSessionEvent(resource: vscode.Uri, eventId: string) {
+				checkProposedApiEnabled(extension, 'chatSessionObserver');
+				return extHostChatSessionObserver.revealChatSessionEvent(resource, eventId);
+			},
+			openChatSessionEditDiff(resource: vscode.Uri, eventId: string) {
+				checkProposedApiEnabled(extension, 'chatSessionObserver');
+				return extHostChatSessionObserver.openChatSessionEditDiff(resource, eventId);
+			},
+			setChatInputSuggestion(session: vscode.Uri, suggestion: vscode.ChatInputSuggestion | undefined) {
+				checkProposedApiEnabled(extension, 'chatInputSuggestion');
+				return extHostChatSessionObserver.setChatInputSuggestion(session, suggestion);
+			},
+			onDidChangeChatInputSuggestion: (listener, thisArgs?, disposables?) => {
+				checkProposedApiEnabled(extension, 'chatInputSuggestion');
+				return _asExtensionEvent(extHostChatSessionObserver.onDidChangeChatInputSuggestion)(listener, thisArgs, disposables);
+			},
+			onDidSubmitChatRequest: (listener, thisArgs?, disposables?) => {
+				checkProposedApiEnabled(extension, 'chatInputSuggestion');
+				return _asExtensionEvent(extHostChatSessionObserver.onDidSubmitChatRequest)(listener, thisArgs, disposables);
+			},
+			addChatDraftRequest(session: vscode.Uri, draft: vscode.ChatDraftRequest) {
+				checkProposedApiEnabled(extension, 'chatDraftRequests');
+				return extHostChatSessionObserver.addChatDraftRequest(session, draft);
+			},
 			registerArtifactIntegrationProvider(id: string, provider: vscode.ChatArtifactIntegrationProvider) {
 				checkProposedApiEnabled(extension, 'chatArtifactIntegrations');
 				return extHostChatArtifactIntegrations.registerProvider(extension, id, provider);

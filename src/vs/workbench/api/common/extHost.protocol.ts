@@ -16,6 +16,7 @@ import * as performance from '../../../base/common/performance.js';
 import Severity from '../../../base/common/severity.js';
 import { ThemeColor, ThemeIcon } from '../../../base/common/themables.js';
 import { URI, UriComponents, UriDto } from '../../../base/common/uri.js';
+import { IActiveChatSession, IChatInputSuggestion, IChatInputSuggestionEvent, IChatRequestSubmission, IChatSessionContentRef, IChatSessionEvent, IChatSessionObservedInfo, IChatSessionsObservedChangeEvent } from '../../contrib/chat/common/sessionObserver/chatSessionObserver.js';
 import { RenderLineNumbersType, TextEditorCursorStyle } from '../../../editor/common/config/editorOptions.js';
 import { ISingleEditOperation } from '../../../editor/common/core/editOperation.js';
 import { IPosition } from '../../../editor/common/core/position.js';
@@ -4108,6 +4109,35 @@ export interface IChatSessionItemsChange {
 	readonly removed: readonly UriComponents[];
 }
 
+// ---- Session observer, input suggestions and drafts (proposed APIs chatSessionObserver, chatInputSuggestion, chatDraftRequests) ----
+
+export interface MainThreadChatSessionObserverShape extends IDisposable {
+	/** Starts forwarding session-list and active-session changes; returns the active sessions now. */
+	$startListening(): Promise<Dto<IActiveChatSession>[]>;
+	$getChatSessions(activeSince: number | undefined): Promise<Dto<IChatSessionObservedInfo>[]>;
+	$observeChatSession(handle: number, resource: UriComponents, fromSeq: number | undefined): Promise<{ info: Dto<IChatSessionObservedInfo>; events: Dto<IChatSessionEvent>[] }>;
+	$disposeObservation(handle: number): void;
+	$fetchContent(handle: number, ref: IChatSessionContentRef): Promise<string>;
+	$openChatSession(resource: UriComponents): Promise<void>;
+	$revealChatSessionEvent(resource: UriComponents, eventId: string): Promise<void>;
+	$openChatSessionEditDiff(resource: UriComponents, eventId: string): Promise<void>;
+	$setChatInputSuggestion(resource: UriComponents, suggestion: IChatInputSuggestion | undefined): void;
+	$addChatDraftRequest(resource: UriComponents, draft: { id: string; text: string; label: string; detail?: string; warning?: string }): void;
+	$updateChatDraftRequest(id: string, patch: { text?: string; label?: string; detail?: string; warning?: string }): void;
+	$disposeChatDraftRequest(id: string): void;
+}
+
+export interface ExtHostChatSessionObserverShape {
+	$onDidChangeChatSessions(e: Dto<IChatSessionsObservedChangeEvent>): void;
+	$onDidChangeActiveChatSessions(active: Dto<IActiveChatSession>[]): void;
+	$onDidAppend(handle: number, events: Dto<IChatSessionEvent>[]): void;
+	$onDidChangeInfo(handle: number, info: Dto<IChatSessionObservedInfo>): void;
+	$onDidChangeChatInputSuggestion(e: Dto<IChatInputSuggestionEvent>): void;
+	$onDidSubmitChatRequest(e: Dto<IChatRequestSubmission>): void;
+	$onDidChangeDraftState(id: string, state: 'shown' | 'hidden' | 'editing', host: string): void;
+	$onDidResolveDraft(id: string, resolution: { outcome: string; finalText?: string; edited: boolean; reason?: string; requestId?: string }): void;
+}
+
 export interface MainThreadChatSessionsShape extends IDisposable {
 	$registerChatSessionItemController(controllerHandle: number, chatSessionType: string, supportsResolve: boolean): void;
 	$updateChatSessionItemControllerCapabilities(controllerHandle: number, supportsResolve: boolean): void;
@@ -4314,6 +4344,7 @@ export const MainContext = {
 	MainThreadAiSettingsSearch: createProxyIdentifier<MainThreadAiSettingsSearchShape>('MainThreadAiSettingsSearch'),
 	MainThreadDataChannels: createProxyIdentifier<MainThreadDataChannelsShape>('MainThreadDataChannels'),
 	MainThreadChatSessions: createProxyIdentifier<MainThreadChatSessionsShape>('MainThreadChatSessions'),
+	MainThreadChatSessionObserver: createProxyIdentifier<MainThreadChatSessionObserverShape>('MainThreadChatSessionObserver'),
 	MainThreadChatOutputRenderer: createProxyIdentifier<MainThreadChatOutputRendererShape>('MainThreadChatOutputRenderer'),
 	MainThreadChatContext: createProxyIdentifier<MainThreadChatContextShape>('MainThreadChatContext'),
 	MainThreadChatDebug: createProxyIdentifier<MainThreadChatDebugShape>('MainThreadChatDebug'),
@@ -4400,6 +4431,7 @@ export const ExtHostContext = {
 	ExtHostMcp: createProxyIdentifier<ExtHostMcpShape>('ExtHostMcp'),
 	ExtHostDataChannels: createProxyIdentifier<ExtHostDataChannelsShape>('ExtHostDataChannels'),
 	ExtHostChatSessions: createProxyIdentifier<ExtHostChatSessionsShape>('ExtHostChatSessions'),
+	ExtHostChatSessionObserver: createProxyIdentifier<ExtHostChatSessionObserverShape>('ExtHostChatSessionObserver'),
 	ExtHostChatQuota: createProxyIdentifier<ExtHostChatQuotaShape>('ExtHostChatQuota'),
 	ExtHostGitExtension: createProxyIdentifier<ExtHostGitExtensionShape>('ExtHostGitExtension'),
 	ExtHostBrowsers: createProxyIdentifier<ExtHostBrowsersShape>('ExtHostBrowsers'),

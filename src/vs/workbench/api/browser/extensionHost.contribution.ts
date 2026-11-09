@@ -104,6 +104,7 @@ import './mainThreadChatQuota.js';
 import './mainThreadChatInputNotification.js';
 import './mainThreadChatOutputRenderer.js';
 import './mainThreadChatSessions.js';
+import './mainThreadChatSessionObserver.js';
 import './mainThreadDataChannels.js';
 import './mainThreadMeteredConnection.js';
 import './mainThreadGitExtensionService.js';
