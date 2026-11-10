@@ -163,9 +163,12 @@ export class SessionSummaryHoverWidget {
 
 		dom.clearNode(this._latestUpdate);
 		if (data.latestUpdate) {
-			const text = this._appendRow(this._latestUpdate, data.latestUpdate.icon ?? Codicon.pulse, localize('sessionSummaryHover.latestUpdate', "Latest update"), data.latestUpdate.label);
+			// The age goes before the headline, so a long headline wraps at its end, not the age's.
+			const text = this._appendRow(this._latestUpdate, data.latestUpdate.icon ?? Codicon.pulse, localize('sessionSummaryHover.latestUpdate', "Latest update"));
 			appendSeparator(text);
-			dom.append(text, dom.$('span.session-summary-hover-detail', undefined, fromNow(data.latestUpdate.at, true)));
+			dom.append(text, dom.$('span.session-summary-hover-detail.session-summary-hover-age', undefined, fromNow(data.latestUpdate.at, true)));
+			appendSeparator(text);
+			dom.append(text, dom.$('span.session-summary-hover-detail', undefined, data.latestUpdate.label));
 		}
 		this._latestUpdate.classList.toggle('hidden', !this._latestUpdate.hasChildNodes());
 

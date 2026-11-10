@@ -711,7 +711,7 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 		const content = new MarkdownString(undefined, { supportThemeIcons: true });
 		content.appendMarkdown('**').appendText(session.label).appendMarkdown('**');
 		if (latest) {
-			content.appendMarkdown(`\n\n$(${(latest.icon ?? Codicon.pulse).id}) ${localize('latestUpdate', "Latest update")} · `).appendText(latest.label).appendMarkdown(` · ${fromNow(latest.timestamp, true)}`);
+			content.appendMarkdown(`\n\n$(${(latest.icon ?? Codicon.pulse).id}) ${localize('latestUpdate', "Latest update")} · ${fromNow(latest.timestamp, true)} · `).appendText(latest.label);
 		}
 		return { content, style: HoverStyle.Pointer };
 	}

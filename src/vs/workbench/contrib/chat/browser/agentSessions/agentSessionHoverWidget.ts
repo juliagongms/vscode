@@ -199,9 +199,9 @@ export class AgentSessionHoverWidget extends Disposable {
 			dom.append(updateRow, renderIcon(this.latestUpdate.icon ?? Codicon.pulse));
 			dom.append(updateRow, dom.$('span', undefined, localize('tooltip.latestUpdate', "Latest update")));
 			dom.append(updateRow, dom.$('span.separator', undefined, '•'));
-			dom.append(updateRow, dom.$('span.agent-session-hover-latest-update-label', undefined, this.latestUpdate.label));
-			dom.append(updateRow, dom.$('span.separator', undefined, '•'));
 			dom.append(updateRow, dom.$('span', undefined, fromNow(this.latestUpdate.timestamp, true)));
+			dom.append(updateRow, dom.$('span.separator', undefined, '•'));
+			dom.append(updateRow, dom.$('span.agent-session-hover-latest-update-label', undefined, this.latestUpdate.label));
 		}
 
 		// Provider icon + name + Duration or start time
