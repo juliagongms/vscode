@@ -54,7 +54,7 @@ import { compareIgnoreCase } from '../../../../../base/common/strings.js';
 import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { IChatSessionsService } from '../../common/chatSessionsService.js';
 import { IVoicePlaybackService } from '../../common/voicePlaybackService.js';
-import { chatSessionAttentionRegistry } from '../../common/sessionObserver/chatSessionObserver.js';
+import { chatSessionAttentionRegistry, getLatestChatSessionAnnotation, IChatSessionAnnotation, IChatSessionAnnotationService } from '../../common/sessionObserver/chatSessionObserver.js';
 import { isEqual } from '../../../../../base/common/resources.js';
 import { createPixelSpinner, IPixelSpinner } from '../../../../../base/browser/ui/pixelSpinner/pixelSpinner.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
@@ -686,7 +686,12 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 		}
 
 		if (!isSessionInProgressStatus(session.element.status) && session.element.isRead()) {
-			return; // the hover is complex and large, for now limit it to in-progress sessions only
+			// The preview hover is complex and large, so it stays on in-progress and unread sessions. A
+			// session with notes (e.g. progress digests) still shows its latest in a short hover.
+			if (this.latestUpdate(session.element)) {
+				template.elementDisposable.add(this.hoverService.setupDelayedHover(template.element, () => this.buildLatestUpdateHover(session.element), { groupId: 'agent.sessions' }));
+			}
+			return;
 		}
 
 		const reducedDelay = session.element.status === AgentSessionStatus.NeedsInput;
@@ -695,11 +700,28 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 		);
 	}
 
+	/** The session's newest note (proposed API `chatSessionAnnotations`), e.g. its latest progress digest. */
+	private latestUpdate(session: IAgentSession): IChatSessionAnnotation | undefined {
+		const annotations = this.instantiationService.invokeFunction(accessor => accessor.get(IChatSessionAnnotationService) as IChatSessionAnnotationService | undefined);
+		return getLatestChatSessionAnnotation(annotations, session.resource);
+	}
+
+	private buildLatestUpdateHover(session: IAgentSession): IDelayedHoverOptions {
+		const latest = this.latestUpdate(session);
+		const content = new MarkdownString(undefined, { supportThemeIcons: true });
+		content.appendMarkdown('**').appendText(session.label).appendMarkdown('**');
+		if (latest) {
+			content.appendMarkdown(`\n\n$(${(latest.icon ?? Codicon.pulse).id}) ${localize('latestUpdate', "Latest update")} · `).appendText(latest.label).appendMarkdown(` · ${fromNow(latest.timestamp, true)}`);
+		}
+		return { content, style: HoverStyle.Pointer };
+	}
+
 	private buildHoverContent(session: IAgentSession): IDelayedHoverOptions {
-		if (this.sessionHover.value?.session.resource.toString() !== session.resource.toString()) {
+		const latestUpdate = this.latestUpdate(session);
+		if (this.sessionHover.value?.session.resource.toString() !== session.resource.toString() || this.sessionHover.value.latestUpdate?.id !== latestUpdate?.id) {
 			// note: hover service use mouseover which triggers again if the mouse moves
-			// within the element. Only recreate the hover widget if the session changed.
-			this.sessionHover.value = this.instantiationService.createInstance(AgentSessionHoverWidget, session);
+			// within the element. Only recreate the hover widget if the session (or its latest note) changed.
+			this.sessionHover.value = this.instantiationService.createInstance(AgentSessionHoverWidget, session, latestUpdate);
 		}
 
 		const widget = this.sessionHover.value;

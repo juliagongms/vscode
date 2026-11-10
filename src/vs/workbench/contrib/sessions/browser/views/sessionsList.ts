@@ -69,7 +69,7 @@ import { BRANCH_CHANGES_CHANGESET_ID, ChatInteractivity, ChatOriginKind, getChat
 import { ISessionChangesStats, readChatChangesStats } from '../../../../services/sessions/common/sessionChangesStatsCache.js';
 import { AgentSessionApprovalModel, agentSessionApprovalId, IAgentSessionApprovalInfo } from '../../../chat/browser/agentSessions/agentSessionApprovalModel.js';
 import { IVoicePlaybackService } from '../../../chat/common/voicePlaybackService.js';
-import { chatSessionAttentionRegistry } from '../../../chat/common/sessionObserver/chatSessionObserver.js';
+import { chatSessionAttentionRegistry, getLatestChatSessionAnnotation, IChatSessionAnnotationService } from '../../../chat/common/sessionObserver/chatSessionObserver.js';
 import { ChatContextKeys } from '../../../chat/common/actions/chatContextKeys.js';
 import { IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
 import { Button } from '../../../../../base/browser/ui/button/button.js';
@@ -120,6 +120,7 @@ import { IDragAndDropData } from '../../../../../base/browser/dnd.js';
 import { ElementsDragAndDropData, ListViewTargetSector } from '../../../../../base/browser/ui/list/listView.js';
 import { ISessionsProvidersService } from '../sessionsProvidersService.js';
 import { createSessionSummaryHover, getChatSummaryHoverData, getDistinctChatHarnessLabel, getSessionDiffStats, getSessionSummaryHoverData } from '../sessionHoverContent.js';
+import type { ISessionSummaryHoverData } from '../../../chat/browser/agentSessions/sessionSummaryHover.js';
 import { SessionStatusIcon } from '../sessionStatusIcon.js';
 import { ChatAutomationsEnabledContext } from '../../../chat/common/automations/automationsEnabled.js';
 import { AICustomizationManagementEditorInput } from '../../../chat/browser/aiCustomization/aiCustomizationManagementEditorInput.js';
@@ -1730,6 +1731,13 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 	) {
 	}
 
+	/** The session's newest note (proposed API `chatSessionAnnotations`), e.g. its latest progress digest, for its hover: just the headline. */
+	private _latestUpdateHoverData(session: ISession): Pick<ISessionSummaryHoverData, 'latestUpdate'> {
+		const annotations = this.instantiationService.invokeFunction(accessor => accessor.get(IChatSessionAnnotationService) as IChatSessionAnnotationService | undefined);
+		const latest = getLatestChatSessionAnnotation(annotations, session.resource, session.mainChat.get().resource);
+		return latest ? { latestUpdate: { label: latest.label, at: new Date(latest.timestamp), ...(latest.icon ? { icon: latest.icon } : {}) } } : {};
+	}
+
 	renderTemplate(container: HTMLElement): ISessionItemTemplate {
 		const disposables = new DisposableStore();
 		const elementDisposables = disposables.add(new DisposableStore());
@@ -1932,7 +1940,10 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 				withSessionsListHoverPresentation(createSessionSummaryHover(
 					element,
 					// Observed Branch Changes are read from memory; reading unobserved ones would load the chat from its backend.
-					getSessionSummaryHoverData(element, this.sessionsProvidersService, this.openerService, this.labelService, getCreatorHoverData(element, this.sessionsManagementService, this.agentHostConnectionsService, this.openerService), this.options.compact(), rowObservesMainChatBranchChanges),
+					{
+						...getSessionSummaryHoverData(element, this.sessionsProvidersService, this.openerService, this.labelService, getCreatorHoverData(element, this.sessionsManagementService, this.agentHostConnectionsService, this.openerService), this.options.compact(), rowObservesMainChatBranchChanges),
+						...this._latestUpdateHoverData(element),
+					},
 					this.openerService,
 				)), { groupId: 'sessions-list' }));
 		}

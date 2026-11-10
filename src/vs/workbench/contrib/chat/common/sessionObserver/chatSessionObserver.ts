@@ -258,6 +258,19 @@ export interface IChatSessionAnnotationService {
 	readonly onDidChangeAnnotations: Event<URI>;
 }
 
+/** The newest note on a session or any of its chats, e.g. its latest progress digest, for the session's hover. */
+export function getLatestChatSessionAnnotation(service: IChatSessionAnnotationService | undefined, ...resources: (URI | undefined)[]): IChatSessionAnnotation | undefined {
+	let latest: IChatSessionAnnotation | undefined;
+	for (const resource of resources) {
+		for (const a of resource && service ? service.getAnnotations(resource) : []) {
+			if (!latest || a.timestamp > latest.timestamp) {
+				latest = a;
+			}
+		}
+	}
+	return latest;
+}
+
 // ---- N6: calling the user to a session (proposed API `chatSessionAttention`) ------------------
 
 /** A mark on a session's row in the sessions lists, e.g. for a draft waiting to be reviewed. */

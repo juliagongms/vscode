@@ -96,12 +96,11 @@ export class PromptTimelineWidgetContrib extends Disposable implements IChatWidg
 	/** (Re)builds the timeline to match the current settings, or tears it down if no surface is enabled. */
 	private _update(): void {
 		this._enablement.clear();
-		// The ruler's layout (and the content reservation it needs) is built for the Agents window's
-		// centered session view, so it stays there. The gutter rail lives in the transcript's existing
-		// left gutter and needs no reservation, so editor windows show it too, where it carries the
-		// session's annotations (e.g. progress digests) beside the chat. The sticky header works in either.
-		const configured = this.configurationService.getValue<PromptTimelineRailStyle>(PROMPT_TIMELINE_DISPLAY_SETTING);
-		const railStyle = this.environmentService.isSessionsWindow || configured === 'gutter' ? configured : 'off';
+		// The rail's layout (and the content reservation it needs) is built for the Agents window's
+		// centered session view, so it stays there; the sticky header works in either window.
+		const railStyle = this.environmentService.isSessionsWindow
+			? this.configurationService.getValue<PromptTimelineRailStyle>(PROMPT_TIMELINE_DISPLAY_SETTING)
+			: 'off';
 		const stickyEnabled = isStickyPromptHeaderShown(this.widget, this.configurationService);
 		if (railStyle !== 'off' || stickyEnabled) {
 			this._createFeature(railStyle, stickyEnabled);
