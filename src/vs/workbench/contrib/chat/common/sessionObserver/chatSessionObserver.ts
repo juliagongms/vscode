@@ -243,7 +243,6 @@ export interface IChatSessionAnnotation {
 	readonly label: string;
 	readonly detail?: IMarkdownString;
 	readonly icon?: ThemeIcon;
-	readonly attention?: boolean;
 }
 
 export const IChatSessionAnnotationService = createDecorator<IChatSessionAnnotationService>('chatSessionAnnotationService');

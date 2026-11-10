@@ -8,20 +8,6 @@ declare module 'vscode' {
 	// Annotations on a chat session's timeline, e.g. progress digests written while it ran.
 
 	/**
-	 * How much an annotation asks for attention.
-	 */
-	export enum ChatSessionAnnotationEmphasis {
-		/**
-		 * An update to read when convenient.
-		 */
-		Normal = 1,
-		/**
-		 * The session needs the user, or is blocked or off course.
-		 */
-		Attention = 2
-	}
-
-	/**
 	 * A note at a moment of a chat session, shown on its prompt timeline between the prompts
 	 * sent before and after it.
 	 */
@@ -45,7 +31,6 @@ declare module 'vscode' {
 		 */
 		readonly detail?: MarkdownString;
 		readonly icon?: ThemeIcon;
-		readonly emphasis?: ChatSessionAnnotationEmphasis;
 	}
 
 	export namespace chat {

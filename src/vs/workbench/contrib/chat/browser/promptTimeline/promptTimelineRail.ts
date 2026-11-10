@@ -30,7 +30,6 @@ export interface IPromptTimelineAnnotation {
 	readonly timestamp: number;
 	readonly label: string;
 	readonly icon?: ThemeIcon;
-	readonly attention?: boolean;
 	/** Renders the note in full into `container` when it is expanded. */
 	readonly renderDetail?: (container: HTMLElement) => IDisposable;
 }

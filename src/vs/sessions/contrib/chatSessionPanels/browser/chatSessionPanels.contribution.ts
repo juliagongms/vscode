@@ -8,11 +8,13 @@ import { CancellationToken, CancellationTokenSource } from '../../../../base/com
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable, DisposableMap, DisposableStore, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
+import { autorun, observableValue, runOnChange } from '../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, MenuRegistry, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
+import { ConfirmResult } from '../../../../platform/dialogs/common/dialogs.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { IEditorOptions } from '../../../../platform/editor/common/editor.js';
 import { ExtensionIdentifier } from '../../../../platform/extensions/common/extensions.js';
@@ -29,10 +31,12 @@ import { EditorPane } from '../../../../workbench/browser/parts/editor/editorPan
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
 import { ActiveEditorContext, AuxiliaryBarVisibleContext, IsAuxiliaryWindowContext, IsSessionsWindowContext, MainEditorAreaVisibleContext } from '../../../../workbench/common/contextkeys.js';
 import { EditorExtensions, EditorInputCapabilities, IEditorFactoryRegistry, IEditorOpenContext, IEditorSerializer, IUntypedEditorInput } from '../../../../workbench/common/editor.js';
-import { EditorInput } from '../../../../workbench/common/editor/editorInput.js';
+import { EditorInput, IEditorCloseHandler } from '../../../../workbench/common/editor/editorInput.js';
 import { IViewBadge } from '../../../../workbench/common/views.js';
 import { chatSessionPanelRegistry, IChatSessionPanelDescriptor } from '../../../../workbench/contrib/chat/common/sessionObserver/chatSessionObserver.js';
 import { Menus, SessionActivityBarGroup } from '../../../../workbench/contrib/sessions/browser/menus.js';
+import { ISessionActivityBarActivityService } from '../../../../workbench/contrib/sessions/common/sessionActivityBarActivityService.js';
+import { IconBadge } from '../../../../workbench/services/activity/common/activity.js';
 import { IOverlayWebview, IWebviewService, WebviewContentPurpose } from '../../../../workbench/contrib/webview/browser/webview.js';
 import { IWebviewViewService, WebviewView } from '../../../../workbench/contrib/webviewView/browser/webviewViewService.js';
 import { IEditorGroup, IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
@@ -47,6 +51,27 @@ import { AgentsWindowMenus } from '../../../browser/agentsWindowMenus.js';
 const SCHEME = 'chat-session-panel';
 
 /**
+ * Panels with updates the user hasn't seen: set by the extension through its view's badge. The
+ * count isn't shown; the tab shows a dot, as for unsaved changes, and so does its Session
+ * Activity Bar entry, as the Changes entry does for new changes.
+ */
+const panelUpdates = observableValue<ReadonlyMap<string, IViewBadge>>('chatSessionPanelUpdates', new Map());
+
+function setPanelUpdates(panelId: string, badge: IViewBadge | undefined): void {
+	const current = panelUpdates.get();
+	if (current.get(panelId)?.tooltip === badge?.tooltip && current.has(panelId) === !!badge) {
+		return;
+	}
+	const next = new Map(current);
+	if (badge) {
+		next.set(panelId, badge);
+	} else {
+		next.delete(panelId);
+	}
+	panelUpdates.set(next, undefined);
+}
+
+/**
  * A plain editor input, not a docked one: the side pane's docked tabs (Changes, Files) live in
  * its detail-only mode, where the editor area is hidden; a panel needs the editor area, as the
  * Browser tab does, and the layout gives it the whole side pane (`isEditorWithoutDockedDetails`).
@@ -56,10 +81,15 @@ export class ChatSessionPanelEditorInput extends EditorInput {
 	static readonly ID = CHAT_SESSION_PANEL_EDITOR_INPUT_ID;
 	static readonly EDITOR_ID = 'workbench.editor.agentSessions.chatSessionPanel';
 
-	private _badge: IViewBadge | undefined;
+	/** The dot needs no saving: closing never asks. */
+	override readonly closeHandler: IEditorCloseHandler = { showConfirm: () => false, confirm: async () => ConfirmResult.DONT_SAVE };
 
 	constructor(readonly panel: IChatSessionPanelDescriptor) {
 		super();
+		this._register(runOnChange(panelUpdates, () => {
+			this._onDidChangeDirty.fire();
+			this._onDidChangeLabel.fire();
+		}));
 	}
 
 	override get resource(): URI {
@@ -79,22 +109,21 @@ export class ChatSessionPanelEditorInput extends EditorInput {
 	}
 
 	override getName(): string {
-		return this._badge && typeof this._badge.value === 'number' && this._badge.value > 0 ? `${this.panel.title} (${this._badge.value})` : this.panel.title;
+		return this.panel.title;
 	}
 
 	override getTitle(): string {
-		return this._badge?.tooltip ? `${this.panel.title}: ${this._badge.tooltip}` : this.panel.title;
+		const updates = panelUpdates.get().get(this.panel.id);
+		return updates?.tooltip ? `${this.panel.title}: ${updates.tooltip}` : this.panel.title;
+	}
+
+	/** Updates the user hasn't seen: the tab's dot. */
+	override isDirty(): boolean {
+		return panelUpdates.get().has(this.panel.id);
 	}
 
 	override getIcon(): ThemeIcon {
 		return this.panel.icon ? ThemeIcon.fromId(this.panel.icon) : Codicon.pulse;
-	}
-
-	setBadge(badge: IViewBadge | undefined): void {
-		if (this._badge?.value !== badge?.value || this._badge?.tooltip !== badge?.tooltip) {
-			this._badge = badge;
-			this._onDidChangeLabel.fire();
-		}
 	}
 
 	override canReopen(): boolean {
@@ -184,7 +213,6 @@ export class ChatSessionPanelEditor extends EditorPane {
 		let title: string | undefined;
 		let description: string | undefined;
 		let badge: IViewBadge | undefined;
-		const self = this;
 		const view: WebviewView = {
 			webview,
 			onDidChangeVisibility: this._onDidChangeVisibility.event,
@@ -196,7 +224,7 @@ export class ChatSessionPanelEditor extends EditorPane {
 			get badge() { return badge; },
 			set badge(value) {
 				badge = value;
-				(self.input as ChatSessionPanelEditorInput | undefined)?.setBadge(value);
+				setPanelUpdates(input.panel.id, value);
 			},
 			dispose: () => this.resetWebview(),
 			show: () => { this.group.openEditor(input); },
@@ -276,7 +304,9 @@ class ChatSessionPanelsAgentsWindowContribution extends Disposable implements IW
 
 	private readonly perPanel = this._register(new DisposableMap<string>());
 
-	constructor() {
+	constructor(
+		@ISessionActivityBarActivityService private readonly activityService: ISessionActivityBarActivityService,
+	) {
 		super();
 		this._register(Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
 			EditorPaneDescriptor.create(ChatSessionPanelEditor, ChatSessionPanelEditor.ID, localize('chatSessionPanel.label', "Session Panel")),
@@ -345,6 +375,14 @@ class ChatSessionPanelsAgentsWindowContribution extends Disposable implements IW
 			order: 5,
 			when: panelTabWhen,
 		}));
+		const dot = store.add(new MutableDisposable());
+		store.add(autorun(reader => {
+			const updates = panelUpdates.read(reader).get(panel.id);
+			dot.value = updates
+				? this.activityService.showActivity(id, { badge: new IconBadge(Codicon.circleFilled, () => updates.tooltip ?? localize('chatSessionPanel.updates', "{0}: new updates", panel.title)) })
+				: undefined;
+		}));
+		store.add(toDisposable(() => setPanelUpdates(panel.id, undefined)));
 		return store;
 	}
 }

@@ -11,7 +11,7 @@ import { revive } from '../../../base/common/marshalling.js';
 import { URI } from '../../../base/common/uri.js';
 import { IExtensionDescription } from '../../../platform/extensions/common/extensions.js';
 import { ExtHostChatSessionObserverShape, IMainContext, MainContext, MainThreadChatSessionObserverShape } from './extHost.protocol.js';
-import { ChatSessionAnnotationEmphasis, Range } from './extHostTypes.js';
+import { Range } from './extHostTypes.js';
 import * as typeConvert from './extHostTypeConverters.js';
 import { ExtHostWebviewViews } from './extHostWebviewView.js';
 
@@ -236,7 +236,6 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 			id: a.id, timestamp: a.timestamp, label: a.label,
 			...(a.detail ? { detail: typeConvert.MarkdownString.from(a.detail) } : {}),
 			...(a.icon ? { icon: a.icon.id } : {}),
-			...(a.emphasis === ChatSessionAnnotationEmphasis.Attention ? { attention: true } : {}),
 		})));
 	}
 
@@ -335,6 +334,9 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 					webviewView,
 					get session() { return session; },
 					onDidChangeSession: onDidChangeSession.event,
+					// Carried by the view's badge: a dot in the Agents Window, the badge in editor windows.
+					get hasUpdates() { return !!webviewView.badge; },
+					set hasUpdates(value) { webviewView.badge = value ? { value: 1, tooltip: 'New updates' } : undefined; },
 				};
 				return provider.resolveChatSessionPanel(panel, token ?? CancellationToken.None);
 			},

@@ -14,6 +14,12 @@ declare module 'vscode' {
 		/** The session the panel shows: the one the user focused last in this window. */
 		readonly session: Uri | undefined;
 		readonly onDidChangeSession: Event<Uri | undefined>;
+		/**
+		 * Whether the panel has updates the user hasn't seen. The Agents Window shows a dot on the
+		 * panel's tab, as for unsaved changes, and on its Session Activity Bar entry; editor windows
+		 * show the view's badge. Set it back to `false` once the user has seen them.
+		 */
+		hasUpdates: boolean;
 	}
 
 	export interface ChatSessionPanelProvider {

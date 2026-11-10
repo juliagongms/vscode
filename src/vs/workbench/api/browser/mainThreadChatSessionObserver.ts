@@ -114,7 +114,6 @@ export class MainThreadChatSessionObserver extends Disposable implements MainThr
 			id: a.id, timestamp: a.timestamp, label: a.label,
 			...(a.detail ? { detail: a.detail } : {}),
 			...(a.icon ? { icon: ThemeIcon.fromId(a.icon) } : {}),
-			...(a.attention ? { attention: true } : {}),
 		})));
 	}
 

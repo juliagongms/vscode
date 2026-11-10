@@ -820,28 +820,25 @@
 }
 
 /* ---- Annotations (proposed API chatSessionAnnotations): notes such as progress digests, drawn
- * where they happened in the session. On the handle, a short dash between the prompts' dots; in the
- * flyout, a row between the prompt rows, the newest expanded, so the flyout reads as the session's
- * story: what was asked, and what came of it. */
+ * where they happened in the session. On the handle, a short dash between the prompts' dots: a rule
+ * across the column reads as a break that sums up what came before, apart from the dots by its
+ * orientation, and as wide as the accented dot so the column keeps one width. In the flyout, a row
+ * between the prompt rows, the newest expanded, so the flyout reads as the session's story: what was
+ * asked, and what came of it. Colour follows the dots: grey, and the accent for the notes after the
+ * prompt the transcript is scrolled to. */
 
 .prompt-timeline-gutter-mark {
-	width: 8px;
+	width: calc(var(--prompt-timeline-gutter-dot-size) * 1.5);
 	height: 2px;
 	flex-shrink: 0;
 	border-radius: var(--vscode-cornerRadius-circle);
 	background-color: var(--vscode-descriptionForeground);
 	opacity: 0.55;
-	transition: opacity 140ms ease;
+	transition: opacity 140ms ease, background-color 140ms ease;
 }
 
-.prompt-timeline-gutter-mark.newest {
-	width: 10px;
+.prompt-timeline-gutter-mark.current {
 	background-color: var(--vscode-focusBorder);
-	opacity: 1;
-}
-
-.prompt-timeline-gutter-mark.attention {
-	background-color: var(--vscode-notificationsWarningIcon-foreground);
 	opacity: 1;
 }
 
@@ -858,13 +855,12 @@
 	border-radius: var(--vscode-cornerRadius-small);
 }
 
-.prompt-timeline-gutter-annotation.newest {
+.prompt-timeline-gutter-annotation.current {
 	border-left-color: var(--vscode-focusBorder);
-	background-color: var(--vscode-list-inactiveSelectionBackground);
 }
 
-.prompt-timeline-gutter-annotation.attention {
-	border-left-color: var(--vscode-notificationsWarningIcon-foreground);
+.prompt-timeline-gutter-annotation.newest {
+	background-color: var(--vscode-list-inactiveSelectionBackground);
 }
 
 .prompt-timeline-gutter-annotation-head {
@@ -901,12 +897,8 @@
 	font-size: 12px;
 }
 
-.prompt-timeline-gutter-annotation.newest .prompt-timeline-gutter-annotation-icon {
+.prompt-timeline-gutter-annotation.current .prompt-timeline-gutter-annotation-icon {
 	color: var(--vscode-focusBorder);
-}
-
-.prompt-timeline-gutter-annotation.attention .prompt-timeline-gutter-annotation-icon {
-	color: var(--vscode-notificationsWarningIcon-foreground);
 }
 
 .prompt-timeline-gutter-annotation-label {

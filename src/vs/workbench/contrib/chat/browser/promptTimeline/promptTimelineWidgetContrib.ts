@@ -211,7 +211,6 @@ export class PromptTimelineWidgetContrib extends Disposable implements IChatWidg
 		return {
 			id: a.id, timestamp: a.timestamp, label: a.label,
 			...(a.icon ? { icon: a.icon } : {}),
-			...(a.attention ? { attention: true } : {}),
 			...(detail ? { renderDetail: (container: HTMLElement) => this.markdownRendererService.render(detail, {}, container) } : {}),
 		};
 	}

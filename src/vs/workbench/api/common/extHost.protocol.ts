@@ -4134,7 +4134,6 @@ export interface IChatSessionAnnotationDto {
 	readonly label: string;
 	readonly detail?: IMarkdownString;
 	readonly icon?: string;
-	readonly attention?: boolean;
 }
 
 export interface ExtHostChatSessionObserverShape {

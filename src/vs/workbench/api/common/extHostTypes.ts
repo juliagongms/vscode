@@ -4581,9 +4581,4 @@ export enum ChatDraftRequestOutcome {
 	Expired = 5,
 }
 
-export enum ChatSessionAnnotationEmphasis {
-	Normal = 1,
-	Attention = 2,
-}
-
 //#endregion
