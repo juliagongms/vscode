@@ -93,11 +93,12 @@ suite('chatSessionObserver', () => {
 	test('input suggestions: ghost text on an empty input or a prefix, and a submission tied to the accept', async () => {
 		const session = URI.parse('copilotcli:/s1');
 		const model = store.add(createTextModel('', null, undefined, URI.from({ scheme: Schemas.vscodeChatInput, path: '/input-1' })));
+		const options: unknown[] = [];
 		const widget = {
-			viewModel: { sessionResource: session, model: { hasRequests: true } },
-			inputEditor: { getModel: () => model, hasTextFocus: () => false, onDidFocusEditorText: Event.None, updateOptions: () => { }, getOption: () => '', getContribution: () => undefined },
+			viewModel: { sessionResource: session, model: { hasRequests: true } }, visible: true, onDidShow: Event.None, onDidChangeViewModel: Event.None,
+			inputEditor: { getModel: () => model, hasTextFocus: () => false, onDidFocusEditorText: Event.None, updateOptions: (o: unknown) => options.push(o), getOption: () => '', getContribution: () => undefined },
 		} as unknown as IChatWidget;
-		const widgets = { getAllWidgets: () => [widget], onDidAddWidget: Event.None } as unknown as IChatWidgetService;
+		const widgets = { getAllWidgets: () => [widget], onDidAddWidget: Event.None, onDidRemoveWidget: Event.None } as unknown as IChatWidgetService;
 		const accepted = store.add(new Emitter<IChatRequestAcceptedEvent>());
 		const chatService = { onDidAcceptRequest: accepted.event } as unknown as IChatService;
 		const observer = { activeSessions: [{ resource: session, host: 'chatView' }] } as unknown as IChatSessionObserverService;
@@ -117,6 +118,8 @@ suite('chatSessionObserver', () => {
 		service.setSuggestion('ext', session, { id: 'r1', text: 'Run the full suite, then commit.' });
 		const item = await provide();
 		assert.strictEqual(item?.insertText, 'Run the full suite, then commit.');
+		// Shown in the visible input before it is focused, and kept there on blur.
+		assert.deepStrictEqual(options.at(-1), { inlineSuggest: { enabled: true, keepOnBlur: true } });
 
 		// A prefix of the suggestion keeps it; other text hides it (never over what the user typed).
 		model.setValue('Run the');
@@ -142,10 +145,10 @@ suite('chatSessionObserver', () => {
 	function suggestionHarness(session: URI) {
 		const input = store.add(createTextModel('', null, undefined, URI.from({ scheme: Schemas.vscodeChatInput, path: '/input-2' })));
 		const widget = {
-			viewModel: { sessionResource: session, model: { hasRequests: true } },
+			viewModel: { sessionResource: session, model: { hasRequests: true } }, visible: true, onDidShow: Event.None, onDidChangeViewModel: Event.None,
 			inputEditor: { getModel: () => input, hasTextFocus: () => false, onDidFocusEditorText: Event.None, updateOptions: () => { }, getOption: () => '', getContribution: () => undefined },
 		} as unknown as IChatWidget;
-		const widgets = { getAllWidgets: () => [widget], onDidAddWidget: Event.None } as unknown as IChatWidgetService;
+		const widgets = { getAllWidgets: () => [widget], onDidAddWidget: Event.None, onDidRemoveWidget: Event.None } as unknown as IChatWidgetService;
 		const chatService = { onDidAcceptRequest: Event.None } as unknown as IChatService;
 		const observer = { activeSessions: [{ resource: session, host: 'agentsWindow' }] } as unknown as IChatSessionObserverService;
 		const features = new LanguageFeaturesService();
@@ -157,7 +160,7 @@ suite('chatSessionObserver', () => {
 		store.add(service.onDidSubmitRequest(e => submissions.push(e)));
 		const ctx = { triggerKind: InlineCompletionTriggerKind.Automatic, selectedSuggestionInfo: undefined, includeInlineEdits: false, includeInlineCompletions: true, requestIssuedDateTime: 0, earliestShownDateTime: 0 } as never;
 		const provide = async (model = input) => (await features.inlineCompletionsProvider.all(model)[0].provideInlineCompletions(model, model.getFullModelRange().getEndPosition(), ctx, CancellationToken.None))?.items[0];
-		return { service, states, submissions, provide };
+		return { service, states, submissions, provide, provider: features.inlineCompletionsProvider.all(input)[0] };
 	}
 
 	test('answer surfaces: a shown carousel takes the answer from the input; the suggested pick accepts it', async () => {
@@ -189,6 +192,19 @@ suite('chatSessionObserver', () => {
 		claim.dispose();
 		assert.deepStrictEqual(states.map(s => [s.state, s.acceptedChars]), [['accepted', 25]]);
 		assert.deepStrictEqual(submissions.map(s => [s.kind, s.fromSuggestion?.id, s.fromSuggestion?.acceptedChars]), [['planDecision', 'p1', 25]]);
+	});
+
+	test('input suggestions: Esc dismisses it for good; only a newer one shows again', async () => {
+		const session = URI.parse('agent-host-copilotcli:/s4');
+		const { service, states, provide, provider } = suggestionHarness(session);
+		service.setSuggestion('ext', session, { id: 'r1', text: 'Dig deeper on Helmsignal.' });
+		const shown = (await provide())!;
+		provider.handleItemDidShow?.({ items: [shown] }, shown, '', undefined as never);
+		provider.handleEndOfLifetime?.({ items: [shown] }, shown, { kind: InlineCompletionEndOfLifeReasonKind.Rejected }, undefined as never);
+		assert.strictEqual(await provide(), undefined);
+		assert.deepStrictEqual(states.map(s => s.state), ['shown', 'rejected']);
+		service.setSuggestion('ext', session, { id: 'r2', text: 'Pick Helmsignal.' });
+		assert.strictEqual((await provide())?.insertText, 'Pick Helmsignal.');
 	});
 
 	test('a reloaded model mints new request IDs; index IDs emit only what is new', () => {
