@@ -33,6 +33,20 @@ declare module 'vscode' {
 		readonly body: string;
 	}
 
+	/**
+	 * Why an OS notification about a session wasn't shown.
+	 */
+	export enum ChatSessionNotificationSkipReason {
+		/**
+		 * The session's window has focus.
+		 */
+		WindowFocused = 1,
+		/**
+		 * `chat.notifyWindowOnConfirmation` is `off`.
+		 */
+		Off = 2
+	}
+
 	export interface ChatSessionNotificationResult {
 		/**
 		 * Whether it was shown: only while the session's window isn't focused (always, when
@@ -40,9 +54,14 @@ declare module 'vscode' {
 		 */
 		readonly shown: boolean;
 		/**
-		 * Whether the user clicked it, which opens the session.
+		 * Why it wasn't shown.
 		 */
-		readonly clicked: boolean;
+		readonly reason?: ChatSessionNotificationSkipReason;
+		/**
+		 * Resolves once the notification is gone: whether the user clicked it, which opens the
+		 * session. A notification the OS keeps may never resolve.
+		 */
+		readonly clicked: Thenable<boolean>;
 	}
 
 	export namespace chat {
@@ -55,7 +74,7 @@ declare module 'vscode' {
 		/**
 		 * Calls the user to a session from outside the editor, the way a session that needs input
 		 * does: the window flashes, the application icon shows its attention badge, and an OS
-		 * notification opens the session when clicked. Resolves once the notification is gone.
+		 * notification opens the session when clicked. Resolves as soon as it is shown or skipped.
 		 */
 		export function notifyChatSession(session: Uri, notification: ChatSessionNotification): Thenable<ChatSessionNotificationResult>;
 	}

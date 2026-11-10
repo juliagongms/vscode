@@ -337,6 +337,13 @@ export interface IChatSessionNotification {
 	readonly body: string;
 }
 
+export interface IChatSessionNotificationResult {
+	readonly shown: boolean;
+	readonly reason?: 'windowFocused' | 'off';
+	/** Settles once the toast is gone: whether it was clicked. */
+	readonly clicked: Promise<boolean>;
+}
+
 export const IChatSessionAttentionService = createDecorator<IChatSessionAttentionService>('chatSessionAttentionService');
 export interface IChatSessionAttentionService {
 	readonly _serviceBrand: undefined;
@@ -345,7 +352,7 @@ export interface IChatSessionAttentionService {
 	 * takes: window attention (taskbar flash, dock badge) and an OS toast that opens the session.
 	 * One toast per owner and session at a time: a newer one replaces it.
 	 */
-	notify(owner: string, session: URI, notification: IChatSessionNotification): Promise<{ readonly shown: boolean; readonly clicked: boolean }>;
+	notify(owner: string, session: URI, notification: IChatSessionNotification): Promise<IChatSessionNotificationResult>;
 	/** Withdraws an owner's toasts (the extension host ended). */
 	clearOwner(owner: string): void;
 }

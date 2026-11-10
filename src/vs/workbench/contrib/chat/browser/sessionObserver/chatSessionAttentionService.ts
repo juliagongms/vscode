@@ -14,7 +14,7 @@ import { FocusMode } from '../../../../../platform/native/common/native.js';
 import { IHostService } from '../../../../services/host/browser/host.js';
 import { IChatService } from '../../common/chatService/chatService.js';
 import { ChatConfiguration, ChatNotificationMode } from '../../common/constants.js';
-import { IChatSessionAttentionService, IChatSessionNotification } from '../../common/sessionObserver/chatSessionObserver.js';
+import { IChatSessionAttentionService, IChatSessionNotification, IChatSessionNotificationResult } from '../../common/sessionObserver/chatSessionObserver.js';
 import { IChatWidgetService } from '../chat.js';
 
 /**
@@ -36,42 +36,49 @@ export class ChatSessionAttentionService extends Disposable implements IChatSess
 		super();
 	}
 
-	async notify(owner: string, session: URI, notification: IChatSessionNotification): Promise<{ readonly shown: boolean; readonly clicked: boolean }> {
+	async notify(owner: string, session: URI, notification: IChatSessionNotification): Promise<IChatSessionNotificationResult> {
 		const mode = this.configurationService.getValue<ChatNotificationMode>(ChatConfiguration.NotifyWindowOnConfirmation);
 		const widget = this.chatWidgetService.getWidgetBySessionResource(session);
 		const targetWindow = widget ? dom.getWindow(widget.domNode) : mainWindow;
 		const isFocused = targetWindow.document.hasFocus();
-		if (mode === ChatNotificationMode.Off || (mode !== ChatNotificationMode.Always && isFocused)) {
-			return { shown: false, clicked: false };
+		if (mode === ChatNotificationMode.Off) {
+			return { shown: false, reason: 'off', clicked: Promise.resolve(false) };
+		}
+		if (mode !== ChatNotificationMode.Always && isFocused) {
+			return { shown: false, reason: 'windowFocused', clicked: Promise.resolve(false) };
 		}
 
 		const key = `${owner}:${session.toString()}`;
 		this.toasts.deleteAndDispose(key);
 		const cts = new CancellationTokenSource();
 		this.toasts.set(key, toDisposable(() => cts.dispose(true)));
-		try {
-			if (!isFocused) {
-				await this.hostService.focus(targetWindow, { mode: FocusMode.Notify });
-			}
-			const title = notification.title ?? this.chatService.getSession(session)?.title;
-			const result = await this.hostService.showToast({
-				title: sanitize(title ? localize('chatSessionAttention.title', "Session: {0}", title) : localize('chatSessionAttention.untitled', "Untitled Session")),
-				body: sanitize(notification.body),
-				actions: [localize('chatSessionAttention.open', "Open Session")],
-				dedupeKey: `chat-session:${session.toString()}:attention`,
-			}, cts.token);
-			const clicked = result.clicked || typeof result.actionIndex === 'number';
-			if (clicked) {
-				await this.hostService.focus(targetWindow, { mode: FocusMode.Force });
-				const opened = await this.chatWidgetService.openSession(session);
-				opened?.focusInput();
-			}
-			return { shown: true, clicked };
-		} finally {
-			if (!cts.token.isCancellationRequested) {
-				this.toasts.deleteAndDispose(key);
-			}
+		if (!isFocused) {
+			await this.hostService.focus(targetWindow, { mode: FocusMode.Notify });
 		}
+		const title = notification.title ?? this.chatService.getSession(session)?.title;
+		// Shown now; whether it's clicked is known only once the toast is gone.
+		const clicked = (async () => {
+			try {
+				const result = await this.hostService.showToast({
+					title: sanitize(title ? localize('chatSessionAttention.title', "Session: {0}", title) : localize('chatSessionAttention.untitled', "Untitled Session")),
+					body: sanitize(notification.body),
+					actions: [localize('chatSessionAttention.open', "Open Session")],
+					dedupeKey: `chat-session:${session.toString()}:attention`,
+				}, cts.token);
+				const wasClicked = result.clicked || typeof result.actionIndex === 'number';
+				if (wasClicked) {
+					await this.hostService.focus(targetWindow, { mode: FocusMode.Force });
+					const opened = await this.chatWidgetService.openSession(session);
+					opened?.focusInput();
+				}
+				return wasClicked;
+			} finally {
+				if (!cts.token.isCancellationRequested) {
+					this.toasts.deleteAndDispose(key);
+				}
+			}
+		})();
+		return { shown: true, clicked };
 	}
 
 	clearOwner(owner: string): void {

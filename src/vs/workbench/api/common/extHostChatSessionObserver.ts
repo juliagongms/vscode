@@ -11,7 +11,7 @@ import { revive } from '../../../base/common/marshalling.js';
 import { URI } from '../../../base/common/uri.js';
 import { IExtensionDescription } from '../../../platform/extensions/common/extensions.js';
 import { ExtHostChatSessionObserverShape, IMainContext, MainContext, MainThreadChatSessionObserverShape } from './extHost.protocol.js';
-import { Range } from './extHostTypes.js';
+import { ChatSessionNotificationSkipReason, Range } from './extHostTypes.js';
 import * as typeConvert from './extHostTypeConverters.js';
 import { ExtHostWebviewViews } from './extHostWebviewView.js';
 
@@ -245,8 +245,23 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 		this.proxy.$setChatSessionAttention(session, attention && { icon: attention.icon.id, tooltip: attention.tooltip });
 	}
 
-	notifyChatSession(session: vscode.Uri, notification: vscode.ChatSessionNotification): Promise<vscode.ChatSessionNotificationResult> {
-		return this.proxy.$notifyChatSession(session, { ...(notification.title ? { title: notification.title } : {}), body: notification.body });
+	private notificationHandle = 0;
+	private readonly notificationClicks = new Map<number, (clicked: boolean) => void>();
+
+	async notifyChatSession(session: vscode.Uri, notification: vscode.ChatSessionNotification): Promise<vscode.ChatSessionNotificationResult> {
+		const handle = ++this.notificationHandle;
+		const clicked = new Promise<boolean>(resolve => this.notificationClicks.set(handle, resolve));
+		const result = await this.proxy.$notifyChatSession(session, { ...(notification.title ? { title: notification.title } : {}), body: notification.body }, handle);
+		if (!result.shown) {
+			this.$onDidSettleChatSessionNotification(handle, false);
+		}
+		const reason = result.reason === 'windowFocused' ? ChatSessionNotificationSkipReason.WindowFocused : result.reason === 'off' ? ChatSessionNotificationSkipReason.Off : undefined;
+		return { shown: result.shown, ...(reason ? { reason } : {}), clicked };
+	}
+
+	$onDidSettleChatSessionNotification(handle: number, clicked: boolean): void {
+		this.notificationClicks.get(handle)?.(clicked);
+		this.notificationClicks.delete(handle);
 	}
 
 	// ---- chatInputSuggestion ----

@@ -4581,4 +4581,9 @@ export enum ChatDraftRequestOutcome {
 	Expired = 5,
 }
 
+export enum ChatSessionNotificationSkipReason {
+	WindowFocused = 1,
+	Off = 2,
+}
+
 //#endregion

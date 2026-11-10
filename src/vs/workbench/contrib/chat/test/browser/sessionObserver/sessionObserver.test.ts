@@ -275,11 +275,14 @@ suite('chatSessionObserver', () => {
 		const config = new TestConfigurationService({ [ChatConfiguration.NotifyWindowOnConfirmation]: 'off' });
 		const service = store.add(new ChatSessionAttentionService(host, config, widgets, chatService));
 
-		assert.deepStrictEqual(await service.notify('ext', session, { body: 'Rudder drafted a steer' }), { shown: false, clicked: false });
+		const off = await service.notify('ext', session, { body: 'Rudder drafted a steer' });
+		assert.deepStrictEqual([off.shown, off.reason, await off.clicked], [false, 'off', false]);
 		assert.strictEqual(calls.length, 0);
 
 		await config.setUserConfiguration(ChatConfiguration.NotifyWindowOnConfirmation, 'always');
-		assert.deepStrictEqual(await service.notify('ext', session, { body: 'Rudder drafted a steer' }), { shown: true, clicked: true });
+		const shown = await service.notify('ext', session, { body: 'Rudder drafted a steer' });
+		assert.strictEqual(shown.shown, true);
+		assert.strictEqual(await shown.clicked, true);
 		assert.ok(calls.includes(`toast:Session: Ambient names|Rudder drafted a steer|chat-session:${session.toString()}:attention`));
 		assert.strictEqual(calls.at(-1), 'open');
 	});

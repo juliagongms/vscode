@@ -4124,7 +4124,7 @@ export interface MainThreadChatSessionObserverShape extends IDisposable {
 	$setChatInputSuggestion(resource: UriComponents, suggestion: IChatInputSuggestion | undefined): void;
 	$setChatSessionAnnotations(resource: UriComponents, annotations: IChatSessionAnnotationDto[]): void;
 	$setChatSessionAttention(resource: UriComponents, attention: { icon: string; tooltip: string } | undefined): void;
-	$notifyChatSession(resource: UriComponents, notification: { title?: string; body: string }): Promise<{ shown: boolean; clicked: boolean }>;
+	$notifyChatSession(resource: UriComponents, notification: { title?: string; body: string }, handle: number): Promise<{ shown: boolean; reason?: 'windowFocused' | 'off' }>;
 	$addChatDraftRequest(resource: UriComponents, draft: { id: string; text: string; label: string; detail?: string; warning?: string }): void;
 	$updateChatDraftRequest(id: string, patch: { text?: string; label?: string; detail?: string; warning?: string }): void;
 	$disposeChatDraftRequest(id: string): void;
@@ -4147,6 +4147,7 @@ export interface ExtHostChatSessionObserverShape {
 	$onDidSubmitChatRequest(e: Dto<IChatRequestSubmission>): void;
 	$onDidChangeDraftState(id: string, state: 'shown' | 'hidden' | 'editing', host: string): void;
 	$onDidResolveDraft(id: string, resolution: { outcome: string; finalText?: string; edited: boolean; reason?: string; requestId?: string }): void;
+	$onDidSettleChatSessionNotification(handle: number, clicked: boolean): void;
 }
 
 export interface MainThreadChatSessionsShape extends IDisposable {

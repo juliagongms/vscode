@@ -122,8 +122,12 @@ export class MainThreadChatSessionObserver extends Disposable implements MainThr
 		chatSessionAttentionRegistry.set(this.owner, URI.revive(resource), attention && { icon: ThemeIcon.fromId(attention.icon), tooltip: attention.tooltip });
 	}
 
-	$notifyChatSession(resource: UriComponents, notification: { title?: string; body: string }): Promise<{ shown: boolean; clicked: boolean }> {
-		return this.attention.notify(this.owner, URI.revive(resource), notification);
+	async $notifyChatSession(resource: UriComponents, notification: { title?: string; body: string }, handle: number): Promise<{ shown: boolean; reason?: 'windowFocused' | 'off' }> {
+		const result = await this.attention.notify(this.owner, URI.revive(resource), notification);
+		if (result.shown) {
+			result.clicked.then(clicked => this.proxy.$onDidSettleChatSessionNotification(handle, clicked), () => this.proxy.$onDidSettleChatSessionNotification(handle, false));
+		}
+		return { shown: result.shown, ...(result.reason ? { reason: result.reason } : {}) };
 	}
 
 	$addChatDraftRequest(resource: UriComponents, draft: { id: string; text: string; label: string; detail?: string; warning?: string }): void {
