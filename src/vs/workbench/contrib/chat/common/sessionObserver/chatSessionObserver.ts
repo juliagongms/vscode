@@ -5,6 +5,7 @@
 
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { ResourceMap } from '../../../../../base/common/map.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
@@ -255,6 +256,85 @@ export interface IChatSessionAnnotationService {
 	getAnnotations(session: URI): readonly IChatSessionAnnotation[];
 	clearOwner(owner: string): void;
 	readonly onDidChangeAnnotations: Event<URI>;
+}
+
+// ---- N6: calling the user to a session (proposed API `chatSessionAttention`) ------------------
+
+/** A mark on a session's row in the sessions lists, e.g. for a draft waiting to be reviewed. */
+export interface IChatSessionAttention {
+	readonly icon: ThemeIcon;
+	readonly tooltip: string;
+}
+
+/**
+ * The marks extensions set on sessions, per owner (extension host). A registry rather than a
+ * service so the sessions lists' renderers read it without another dependency.
+ */
+class ChatSessionAttentionRegistry {
+	private readonly bySession = new ResourceMap<Map<string, IChatSessionAttention>>();
+	private readonly _onDidChange = new Emitter<URI>();
+	readonly onDidChange = this._onDidChange.event;
+
+	set(owner: string, session: URI, attention: IChatSessionAttention | undefined): void {
+		let owners = this.bySession.get(session);
+		if (!attention) {
+			if (!owners?.delete(owner)) {
+				return;
+			}
+			if (!owners.size) {
+				this.bySession.delete(session);
+			}
+		} else {
+			if (!owners) {
+				owners = new Map();
+				this.bySession.set(session, owners);
+			}
+			owners.set(owner, attention);
+		}
+		this._onDidChange.fire(session);
+	}
+
+	/** The newest mark on any of the given resources (a session and its chats). */
+	get(...resources: (URI | undefined)[]): IChatSessionAttention | undefined {
+		for (const resource of resources) {
+			const owners = resource && this.bySession.get(resource);
+			if (owners?.size) {
+				return [...owners.values()].at(-1);
+			}
+		}
+		return undefined;
+	}
+
+	clearOwner(owner: string): void {
+		for (const [session, owners] of [...this.bySession]) {
+			if (owners.delete(owner)) {
+				if (!owners.size) {
+					this.bySession.delete(session);
+				}
+				this._onDidChange.fire(session);
+			}
+		}
+	}
+}
+
+export const chatSessionAttentionRegistry = new ChatSessionAttentionRegistry();
+
+export interface IChatSessionNotification {
+	readonly title?: string;
+	readonly body: string;
+}
+
+export const IChatSessionAttentionService = createDecorator<IChatSessionAttentionService>('chatSessionAttentionService');
+export interface IChatSessionAttentionService {
+	readonly _serviceBrand: undefined;
+	/**
+	 * Calls the user to a session from outside VS Code through the path a session that needs input
+	 * takes: window attention (taskbar flash, dock badge) and an OS toast that opens the session.
+	 * One toast per owner and session at a time: a newer one replaces it.
+	 */
+	notify(owner: string, session: URI, notification: IChatSessionNotification): Promise<{ readonly shown: boolean; readonly clicked: boolean }>;
+	/** Withdraws an owner's toasts (the extension host ended). */
+	clearOwner(owner: string): void;
 }
 
 // ---- N3: drafts (proposed API `chatDraftRequests`) -------------------------------------------

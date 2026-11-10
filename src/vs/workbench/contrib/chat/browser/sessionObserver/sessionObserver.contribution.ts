@@ -16,8 +16,9 @@ import { IWorkbenchEnvironmentService } from '../../../../services/environment/c
 import { isProposedApiEnabled } from '../../../../services/extensions/common/extensions.js';
 import { ExtensionsRegistry } from '../../../../services/extensions/common/extensionsRegistry.js';
 import { WebviewViewPane } from '../../../webviewView/browser/webviewViewPane.js';
-import { chatSessionPanelRegistry, IChatDraftRequestService, IChatInputSuggestionService, IChatSessionAnnotationService, IChatSessionObserverService } from '../../common/sessionObserver/chatSessionObserver.js';
+import { chatSessionPanelRegistry, IChatDraftRequestService, IChatInputSuggestionService, IChatSessionAnnotationService, IChatSessionAttentionService, IChatSessionObserverService } from '../../common/sessionObserver/chatSessionObserver.js';
 import { ChatSessionAnnotationService } from './chatSessionAnnotationService.js';
+import { ChatSessionAttentionService } from './chatSessionAttentionService.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
 import { ChatViewContainerId, IChatWidget, IChatWidgetService } from '../chat.js';
@@ -29,6 +30,7 @@ registerSingleton(IChatSessionObserverService, ChatSessionObserverService, Insta
 registerSingleton(IChatDraftRequestService, ChatDraftRequestService, InstantiationType.Delayed);
 registerSingleton(IChatInputSuggestionService, ChatInputSuggestionService, InstantiationType.Delayed);
 registerSingleton(IChatSessionAnnotationService, ChatSessionAnnotationService, InstantiationType.Delayed);
+registerSingleton(IChatSessionAttentionService, ChatSessionAttentionService, InstantiationType.Delayed);
 
 // ---- N4: panels beside the active chat session (proposed API `chatSessionPanel`) ----
 

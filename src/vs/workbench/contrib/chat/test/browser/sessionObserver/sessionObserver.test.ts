@@ -8,7 +8,7 @@ import { URI } from '../../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { ChatDraftRequestService } from '../../../browser/sessionObserver/chatDraftRequestService.js';
 import { CopilotCliEventMapper, cliUserOrigin } from '../../../browser/sessionObserver/copilotCliTranscriptSource.js';
-import { IChatDraftResolution, IChatInputSuggestionEvent, IChatRequestSubmission, IChatSessionEventInput, IChatSessionObserverService, IChatSessionTranscriptSink } from '../../../common/sessionObserver/chatSessionObserver.js';
+import { chatSessionAttentionRegistry, IChatDraftResolution, IChatInputSuggestionEvent, IChatRequestSubmission, IChatSessionEventInput, IChatSessionObserverService, IChatSessionTranscriptSink } from '../../../common/sessionObserver/chatSessionObserver.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
 import { Schemas } from '../../../../../../base/common/network.js';
@@ -22,6 +22,10 @@ import { ChatRequestQueueKind, IChatRequestAcceptedEvent, IChatService } from '.
 import { CHAT_QUESTION_ANSWER_SCHEME } from '../../../browser/widget/chatContentParts/chatQuestionAnswerEditor.js';
 import { ChatModelProjector } from '../../../browser/sessionObserver/chatModelTranscriptSource.js';
 import { ChatSessionAnnotationService } from '../../../browser/sessionObserver/chatSessionAnnotationService.js';
+import { ChatSessionAttentionService } from '../../../browser/sessionObserver/chatSessionAttentionService.js';
+import { IHostService } from '../../../../../services/host/browser/host.js';
+import { ThemeIcon } from '../../../../../../base/common/themables.js';
+import { ChatConfiguration } from '../../../common/constants.js';
 import { IChatModel } from '../../../common/model/chatModel.js';
 
 suite('chatSessionObserver', () => {
@@ -243,6 +247,41 @@ suite('chatSessionObserver', () => {
 		service.setAnnotations('ext1', session, []);
 		assert.deepStrictEqual(service.getAnnotations(session), []);
 		assert.strictEqual(changed.length, 4);
+	});
+
+	test('attention: a mark per owner, found by the session or its chat, gone with its owner', () => {
+		const session = URI.parse('agent-host-copilotcli:/s10');
+		const chat = URI.parse('vscode-chat-session://local/s10');
+		const changed: string[] = [];
+		store.add(chatSessionAttentionRegistry.onDidChange(uri => changed.push(uri.toString())));
+		chatSessionAttentionRegistry.set('ext1', chat, { icon: ThemeIcon.fromId('comment-draft'), tooltip: 'A steer to review' });
+		assert.strictEqual(chatSessionAttentionRegistry.get(session), undefined);
+		assert.strictEqual(chatSessionAttentionRegistry.get(session, chat)?.tooltip, 'A steer to review');
+		chatSessionAttentionRegistry.clearOwner('ext1');
+		assert.strictEqual(chatSessionAttentionRegistry.get(session, chat), undefined);
+		chatSessionAttentionRegistry.set('ext1', chat, undefined);
+		assert.strictEqual(changed.length, 2);
+	});
+
+	test('attention: an OS notification goes the needs-input way (window attention, then a toast that opens the session), unless notifications are off', async () => {
+		const session = URI.parse('agent-host-copilotcli:/s11');
+		const calls: string[] = [];
+		const host = {
+			focus: async (_w: unknown, o?: { mode: number }) => { calls.push(`focus:${o?.mode}`); },
+			showToast: async (o: { title: string; body: string; dedupeKey?: string }) => { calls.push(`toast:${o.title}|${o.body}|${o.dedupeKey}`); return { clicked: true, supported: true }; },
+		} as unknown as IHostService;
+		const widgets = { getWidgetBySessionResource: () => undefined, openSession: async () => { calls.push('open'); return undefined; } } as unknown as IChatWidgetService;
+		const chatService = { getSession: () => ({ title: 'Ambient names' }) } as unknown as IChatService;
+		const config = new TestConfigurationService({ [ChatConfiguration.NotifyWindowOnConfirmation]: 'off' });
+		const service = store.add(new ChatSessionAttentionService(host, config, widgets, chatService));
+
+		assert.deepStrictEqual(await service.notify('ext', session, { body: 'Rudder drafted a steer' }), { shown: false, clicked: false });
+		assert.strictEqual(calls.length, 0);
+
+		await config.setUserConfiguration(ChatConfiguration.NotifyWindowOnConfirmation, 'always');
+		assert.deepStrictEqual(await service.notify('ext', session, { body: 'Rudder drafted a steer' }), { shown: true, clicked: true });
+		assert.ok(calls.includes(`toast:Session: Ambient names|Rudder drafted a steer|chat-session:${session.toString()}:attention`));
+		assert.strictEqual(calls.at(-1), 'open');
 	});
 });
 

@@ -54,6 +54,8 @@ import { compareIgnoreCase } from '../../../../../base/common/strings.js';
 import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { IChatSessionsService } from '../../common/chatSessionsService.js';
 import { IVoicePlaybackService } from '../../common/voicePlaybackService.js';
+import { chatSessionAttentionRegistry } from '../../common/sessionObserver/chatSessionObserver.js';
+import { isEqual } from '../../../../../base/common/resources.js';
 import { createPixelSpinner, IPixelSpinner } from '../../../../../base/browser/ui/pixelSpinner/pixelSpinner.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
 
@@ -72,6 +74,8 @@ interface IAgentSessionItemTemplate {
 	readonly title: IconLabel;
 	readonly pinnedIndicator: HTMLElement;
 	readonly pendingVoiceIndicator: HTMLElement;
+	/** An extension's call to the session (proposed API `chatSessionAttention`), e.g. a draft to review. */
+	readonly attentionIndicator: HTMLElement;
 	readonly statusContainer: HTMLElement;
 	readonly statusTime: HTMLElement;
 	readonly titleToolbar: MenuWorkbenchToolBar;
@@ -288,6 +292,7 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 						h('div.agent-session-title@title'),
 						h('div.agent-session-pinned-indicator@pinnedIndicator'),
 						h('div.agent-session-pending-voice-indicator@pendingVoiceIndicator'),
+						h('div.agent-session-attention-indicator@attentionIndicator'),
 						h('div.agent-session-title-toolbar@titleToolbar'),
 					]),
 					h('div.agent-session-details-row', [
@@ -331,6 +336,7 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 			title: disposables.add(new IconLabel(elements.title, { supportHighlights: true, supportIcons: true })),
 			pinnedIndicator: elements.pinnedIndicator,
 			pendingVoiceIndicator: elements.pendingVoiceIndicator,
+			attentionIndicator: elements.attentionIndicator,
 			titleToolbar,
 			harnessIcon: elements.harnessIcon,
 			harnessSeparator: elements.harnessSeparator,
@@ -417,6 +423,19 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 		template.elementDisposable.add(autorun(reader => {
 			this.voicePlaybackService.pendingResponseVersion.read(reader);
 			updatePendingVoice();
+		}));
+
+		// An extension calling the user to the session (e.g. a draft to review), until it clears it.
+		const renderAttention = () => {
+			const attention = chatSessionAttentionRegistry.get(sessionResource);
+			template.attentionIndicator.className = 'agent-session-attention-indicator' + (attention ? ` visible ${ThemeIcon.asClassName(attention.icon)}` : '');
+			template.attentionIndicator.title = attention?.tooltip ?? '';
+		};
+		renderAttention();
+		template.elementDisposable.add(chatSessionAttentionRegistry.onDidChange(resource => {
+			if (isEqual(resource, sessionResource)) {
+				renderAttention();
+			}
 		}));
 
 		// Badge

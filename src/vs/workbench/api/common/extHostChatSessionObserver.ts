@@ -239,6 +239,16 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 		})));
 	}
 
+	// ---- chatSessionAttention ----
+
+	setChatSessionAttention(session: vscode.Uri, attention: vscode.ChatSessionAttention | undefined): void {
+		this.proxy.$setChatSessionAttention(session, attention && { icon: attention.icon.id, tooltip: attention.tooltip });
+	}
+
+	notifyChatSession(session: vscode.Uri, notification: vscode.ChatSessionNotification): Promise<vscode.ChatSessionNotificationResult> {
+		return this.proxy.$notifyChatSession(session, { ...(notification.title ? { title: notification.title } : {}), body: notification.body });
+	}
+
 	// ---- chatInputSuggestion ----
 
 	setChatInputSuggestion(session: vscode.Uri, suggestion: vscode.ChatInputSuggestion | undefined): void {

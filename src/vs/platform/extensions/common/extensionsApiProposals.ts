@@ -105,6 +105,9 @@ const _allApiProposals = {
 	chatSessionAnnotations: {
 		proposal: 'https://raw.githubusercontent.com/microsoft/vscode/main/src/vscode-dts/vscode.proposed.chatSessionAnnotations.d.ts',
 	},
+	chatSessionAttention: {
+		proposal: 'https://raw.githubusercontent.com/microsoft/vscode/main/src/vscode-dts/vscode.proposed.chatSessionAttention.d.ts',
+	},
 	chatSessionCustomizationProvider: {
 		proposal: 'https://raw.githubusercontent.com/microsoft/vscode/main/src/vscode-dts/vscode.proposed.chatSessionCustomizationProvider.d.ts',
 	},
