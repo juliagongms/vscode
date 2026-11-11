@@ -139,9 +139,6 @@ export class PromptTimelineGutterRail extends Disposable implements IPromptTimel
 	private readonly _annotationDisposables = this._register(new DisposableStore());
 	/** The marks and rows drawn for the annotations, removed on each redraw. */
 	private readonly _annotationElements: HTMLElement[] = [];
-	/** Each handle mark with the dot it follows, and each flyout row with the prompt it follows. */
-	private readonly _annotationMarks: { readonly element: HTMLElement; readonly dot: number }[] = [];
-	private readonly _annotationRows: { readonly element: HTMLElement; readonly slot: number }[] = [];
 	/** Annotations the user expanded or collapsed; the others follow the default (the newest expanded). */
 	private readonly _annotationToggled = new Map<string, boolean>();
 
@@ -372,18 +369,6 @@ export class PromptTimelineGutterRail extends Disposable implements IPromptTimel
 			this._dots[i].classList.toggle('active', i === activeDot);
 			this._dots[i].classList.toggle('preview', i === previewDot);
 		}
-		this._updateAnnotationHighlights();
-	}
-
-	/** The notes after the active ("you are here") prompt take its accent, as its dot does; the rest stay grey. */
-	private _updateAnnotationHighlights(): void {
-		const activeDot = this._findNearestDotIndex(this._activeIndex);
-		for (const mark of this._annotationMarks) {
-			mark.element.classList.toggle('current', this._activeIndex >= 0 && mark.dot === activeDot);
-		}
-		for (const row of this._annotationRows) {
-			row.element.classList.toggle('current', this._activeIndex >= 0 && row.slot === this._activeIndex);
-		}
 	}
 
 	private _findNearestDotIndex(tickIndex: number): number {
@@ -430,15 +415,14 @@ export class PromptTimelineGutterRail extends Disposable implements IPromptTimel
 	/**
 	 * Draws the annotations where they happened: a short dash between the resting dots, and a row
 	 * between the prompt rows in the flyout, the newest expanded so the flyout reads as the session's
-	 * story. Those after the active prompt take its accent (see `_updateAnnotationHighlights`).
+	 * story. The newest notes (those after the last prompt that has any) take the dots' accent; older
+	 * ones stay grey, wherever the transcript is scrolled.
 	 */
 	private _renderAnnotations(): void {
 		this._annotationDisposables.clear();
 		for (const el of this._annotationElements.splice(0)) {
 			el.remove();
 		}
-		this._annotationMarks.length = 0;
-		this._annotationRows.length = 0;
 		const annotations = this._annotations;
 		if (!annotations.length) {
 			this._domNode.classList.remove('has-annotations');
@@ -447,20 +431,23 @@ export class PromptTimelineGutterRail extends Disposable implements IPromptTimel
 		this._domNode.classList.add('has-annotations');
 		const slots = annotationSlots(this._rows.map(r => r.tick.timestamp), annotations);
 		const newest = annotations.length - 1;
-
-		// Resting handle: one dash per gap between dots that holds any annotation.
-		const dashAfterDot = new Set<number>();
-		for (const slot of slots) {
+		// The latest update: every note after the last prompt that has notes.
+		const newestSlot = Math.max(...slots);
+		const dotOf = (slot: number) => {
 			let dot = -1;
 			for (let d = 0; d < this._dotTicks.length && this._dotTicks[d] <= slot; d++) {
 				dot = d;
 			}
-			dashAfterDot.add(dot);
-		}
+			return dot;
+		};
+
+		// Resting handle: one dash per gap between dots that holds any annotation.
+		const dashAfterDot = new Set(slots.map(dotOf));
+		const newestDot = dotOf(newestSlot);
 		for (const dot of dashAfterDot) {
 			const mark = $('.prompt-timeline-gutter-mark');
 			this._annotationElements.push(mark);
-			this._annotationMarks.push({ element: mark, dot });
+			mark.classList.toggle('current', dot === newestDot);
 			if (dot < 0) {
 				this._rest.prepend(mark);
 			} else {
@@ -473,7 +460,7 @@ export class PromptTimelineGutterRail extends Disposable implements IPromptTimel
 		annotations.forEach((a, i) => {
 			const row = $('.prompt-timeline-gutter-annotation');
 			this._annotationElements.push(row);
-			this._annotationRows.push({ element: row, slot: slots[i] });
+			row.classList.toggle('current', slots[i] === newestSlot);
 			row.classList.toggle('newest', i === newest);
 			const head = append(row, $<HTMLButtonElement>('button.prompt-timeline-gutter-annotation-head'));
 			const icon = a.icon ?? Codicon.pulse;
@@ -524,7 +511,6 @@ export class PromptTimelineGutterRail extends Disposable implements IPromptTimel
 			}
 			insertAfter.set(slots[i], row);
 		});
-		this._updateAnnotationHighlights();
 	}
 
 	setTicks(ticks: readonly PromptTick[]): void {
