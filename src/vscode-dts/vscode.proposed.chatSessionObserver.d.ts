@@ -327,6 +327,11 @@ declare module 'vscode' {
 		readonly displayName?: string;
 		readonly input: unknown;
 		readonly contributor?: string;
+		/**
+		 * What the session's transcript shows for the call, as markdown, with the links it shows
+		 * (the file it reads or edits, the page it fetches).
+		 */
+		readonly message?: string;
 	}
 
 	export interface ChatSessionToolOutputEvent extends ChatSessionEventBase {

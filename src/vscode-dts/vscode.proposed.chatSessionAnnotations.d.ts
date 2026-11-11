@@ -41,5 +41,15 @@ declare module 'vscode' {
 		 * @param annotations The annotations; an empty array removes them.
 		 */
 		export function setChatSessionAnnotations(session: Uri, annotations: readonly ChatSessionAnnotation[]): void;
+
+		/**
+		 * What a chat transcript shows when the user hovers a link to each of the given targets: a
+		 * rich link's tooltip (a pull request's, for example), a file's path, a web page's address;
+		 * an empty string for a command. For links shown outside chat that should read the same.
+		 *
+		 * @param hrefs The links' targets, such as `file:` URIs and web addresses.
+		 * @returns One tooltip per target, in order.
+		 */
+		export function getChatLinkTooltips(hrefs: readonly string[]): Thenable<string[]>;
 	}
 }

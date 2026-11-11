@@ -7,6 +7,14 @@ import { Disposable, DisposableMap, DisposableStore } from '../../../base/common
 import { URI, UriComponents } from '../../../base/common/uri.js';
 import { chatSessionAttentionRegistry, IChatDraftRequestService, IChatInputSuggestion, IChatInputSuggestionService, IChatSessionAnnotationService, IChatSessionAttentionService, IChatSessionContentRef, IChatSessionObserverService, IChatSessionTranscript } from '../../contrib/chat/common/sessionObserver/chatSessionObserver.js';
 import { ThemeIcon } from '../../../base/common/themables.js';
+import { CancellationToken } from '../../../base/common/cancellation.js';
+import { MarkdownString } from '../../../base/common/htmlContent.js';
+import { IConfigurationService } from '../../../platform/configuration/common/configuration.js';
+import { ILinkPresentationService } from '../../../platform/dataChannel/common/dataChannel.js';
+import { IMarkdownRendererService } from '../../../platform/markdown/browser/markdownRenderer.js';
+import { ChatConfiguration } from '../../contrib/chat/common/constants.js';
+import { decoratesAsRichLink } from '../../contrib/chat/browser/widget/chatContentParts/chatMarkdownDecorationsRenderer.js';
+import { getChatRichLinkTooltip } from '../../contrib/chat/browser/widget/chatContentParts/chatRichLink.js';
 import { extHostNamedCustomer, IExtHostContext } from '../../services/extensions/common/extHostCustomers.js';
 import { ExtHostChatSessionObserverShape, ExtHostContext, IChatSessionAnnotationDto, MainContext, MainThreadChatSessionObserverShape } from '../common/extHost.protocol.js';
 
@@ -32,6 +40,9 @@ export class MainThreadChatSessionObserver extends Disposable implements MainThr
 		@IChatDraftRequestService private readonly draftService: IChatDraftRequestService,
 		@IChatSessionAnnotationService private readonly annotations: IChatSessionAnnotationService,
 		@IChatSessionAttentionService private readonly attention: IChatSessionAttentionService,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@ILinkPresentationService private readonly linkPresentationService: ILinkPresentationService,
+		@IMarkdownRendererService private readonly markdownRendererService: IMarkdownRendererService,
 	) {
 		super();
 		this.proxy = extHostContext.getProxy(ExtHostContext.ExtHostChatSessionObserver);
@@ -116,6 +127,26 @@ export class MainThreadChatSessionObserver extends Disposable implements MainThr
 			...(a.detail ? { detail: a.detail } : {}),
 			...(a.icon ? { icon: ThemeIcon.fromId(a.icon) } : {}),
 		})));
+	}
+
+	async $getChatLinkTooltips(hrefs: string[]): Promise<string[]> {
+		const richLinks = this.configurationService.getValue<boolean>(ChatConfiguration.RichLinks) === true;
+		return Promise.all(hrefs.map(async href => {
+			// The transcript's own two paths: a rich link's presentation, else the title its markdown renderer gives the link.
+			if (decoratesAsRichLink(href, richLinks)) {
+				const tooltip = await getChatRichLinkTooltip(this.linkPresentationService, href, 2000, CancellationToken.None);
+				if (tooltip !== undefined) {
+					return tooltip;
+				}
+			}
+			const rendered = this.markdownRendererService.render(new MarkdownString(`[link](<${href}>)`));
+			try {
+				// eslint-disable-next-line no-restricted-syntax
+				return rendered.element.querySelector('a')?.getAttribute('title') ?? '';
+			} finally {
+				rendered.dispose();
+			}
+		}));
 	}
 
 	$setChatSessionAttention(resource: UriComponents, attention: { icon: string; tooltip: string } | undefined): void {

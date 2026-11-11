@@ -6,7 +6,7 @@
 import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { hash } from '../../../../../base/common/hash.js';
-import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
+import { escapeMarkdownSyntaxTokens, IMarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Disposable, DisposableMap, DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IChatToolInvocation, IChatToolInvocationSerialized, IChatService, isLegacyChatTerminalToolInvocationData } from '../../common/chatService/chatService.js';
@@ -18,6 +18,11 @@ import { IToolResultInputOutputDetails } from '../../common/tools/languageModelT
 
 function text(v: string | IMarkdownString | undefined): string {
 	return v === undefined ? '' : typeof v === 'string' ? v : v.value;
+}
+
+/** A message as markdown: plain text escaped, so its links are only the ones it really has. */
+function markdown(v: string | IMarkdownString | undefined): string {
+	return v === undefined ? '' : typeof v === 'string' ? escapeMarkdownSyntaxTokens(v) : v.value;
 }
 
 function lines(s: string): number {
@@ -249,7 +254,7 @@ export class ChatModelProjector {
 		this.once(`call:${callId}`, () => {
 			const params = IChatToolInvocation.getParameters(part);
 			const input = params ?? (data?.kind === 'terminal' ? { command: isLegacyChatTerminalToolInvocationData(data) ? data.command : data.commandLine.toolEdited ?? data.commandLine.original } : data?.kind === 'simpleToolInvocation' ? data.input : text(part.invocationMessage));
-			out.push({ id: `call:${callId}`, at: started, turnId, ...nest, kind: 'toolCall', callId, name: part.toolId, displayName: text(part.invocationMessage), input, ...(part.source ? { contributor: part.source.type } : {}) });
+			out.push({ id: `call:${callId}`, at: started, turnId, ...nest, kind: 'toolCall', callId, name: part.toolId, displayName: text(part.invocationMessage), input, ...(part.source ? { contributor: part.source.type } : {}), ...(text(part.invocationMessage) ? { message: markdown(part.invocationMessage) } : {}) });
 			if (data?.kind === 'subagent') {
 				out.push({ id: `sa:${callId}`, at: started, turnId, kind: 'subagentStarted', name: data.agentDisplayName ?? data.agentName ?? 'subagent', ...(data.description ? { description: data.description } : {}), callId });
 			}

@@ -5,6 +5,7 @@
 
 import { Limiter, raceTimeout, RunOnceScheduler } from '../../../../../base/common/async.js';
 import { decodeBase64 } from '../../../../../base/common/buffer.js';
+import { escapeMarkdownSyntaxTokens } from '../../../../../base/common/htmlContent.js';
 import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { removeAnsiEscapeCodes } from '../../../../../base/common/strings.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -87,6 +88,11 @@ function parseTime(value: string | undefined): number | undefined {
 
 function textOf(value: StringOrMarkdown | undefined): string {
 	return value === undefined ? '' : typeof value === 'string' ? value : value.markdown;
+}
+
+/** A message as markdown: plain text escaped, so its links are only the ones it really has. */
+function markdownOf(value: StringOrMarkdown): string {
+	return typeof value === 'string' ? escapeMarkdownSyntaxTokens(value) : value.markdown;
 }
 
 function isTextual(contentType: string | undefined): boolean {
@@ -572,6 +578,7 @@ export class AgentHostTranscriptProjector {
 		this.once(`call:${callId}`, out, () => ({
 			...env(`call:${callId}`, rawType), kind: 'toolCall', callId, name: tc.toolName, displayName: tc.displayName,
 			input: tc.status === ToolCallStatus.Streaming ? this.parseInput(tc.partialInput) : this.toolInput(tc.toolInput),
+			...(tc.invocationMessage && textOf(tc.invocationMessage) ? { message: markdownOf(tc.invocationMessage) } : {}),
 			...(tc.contributor ? { contributor: tc.contributor.kind === ToolCallContributorKind.MCP ? `mcp:${meta.mcpServerName ?? tc.contributor.customizationId}` : `client:${tc.contributor.clientId}` } : {}),
 		}));
 

@@ -1783,6 +1783,10 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'chatSessionAnnotations');
 				return extHostChatSessionObserver.setChatSessionAnnotations(session, annotations);
 			},
+			getChatLinkTooltips(hrefs: readonly string[]) {
+				checkProposedApiEnabled(extension, 'chatSessionAnnotations');
+				return extHostChatSessionObserver.getChatLinkTooltips(hrefs);
+			},
 			setChatSessionAttention(session: vscode.Uri, attention: vscode.ChatSessionAttention | undefined) {
 				checkProposedApiEnabled(extension, 'chatSessionAttention');
 				return extHostChatSessionObserver.setChatSessionAttention(session, attention);

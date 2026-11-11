@@ -133,6 +133,15 @@ suite('AgentHostTranscriptSource', () => {
 		assert.deepStrictEqual(only(events, 'permissionDecision').map(e => [e.permissionId, e.decision, e.option]), [['rm', 'denied', 'Deny']]);
 	});
 
+	test('a tool call carries the message the transcript shows for it, links and all', () => {
+		const { projector } = createProjector();
+		const events = projector.project(snapshot([turn('t1', 0, msg('go'), [
+			tool({ status: ToolCallStatus.Completed, toolCallId: 'f', toolName: 'web_fetch', displayName: 'Fetch Web Content', invocationMessage: { markdown: 'Fetching [https://rudderhq.dev/](https://rudderhq.dev/)' }, toolInput: '{"url":"https://rudderhq.dev/"}', confirmed: ToolCallConfirmationReason.NotNeeded, success: true, pastTenseMessage: 'Fetched' }),
+			tool({ status: ToolCallStatus.Completed, toolCallId: 'p', toolName: 'Bash', displayName: 'Run command', invocationMessage: 'Run [x](y) *now*', toolInput: '{"command":"x"}', confirmed: ToolCallConfirmationReason.NotNeeded, success: true, pastTenseMessage: 'Ran' }),
+		])]));
+		assert.deepStrictEqual(only(events, 'toolCall').map(e => e.message), ['Fetching [https://rudderhq.dev/](https://rudderhq.dev/)', 'Run \\[x\\]\\(y\\) \\*now\\*']);
+	});
+
 	test('live: streaming text waits until it closes, a pending confirmation is a question, then its decision and result follow', () => {
 		const { projector } = createProjector();
 		const message = msg('Run the tests');

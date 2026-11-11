@@ -239,6 +239,10 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 		})));
 	}
 
+	getChatLinkTooltips(hrefs: readonly string[]): Thenable<string[]> {
+		return this.proxy.$getChatLinkTooltips([...hrefs]);
+	}
+
 	// ---- chatSessionAttention ----
 
 	setChatSessionAttention(session: vscode.Uri, attention: vscode.ChatSessionAttention | undefined): void {

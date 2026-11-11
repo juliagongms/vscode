@@ -87,7 +87,7 @@ export type ChatSessionEventData =
 	}
 	| { readonly kind: 'agentText'; readonly text: string; readonly final: boolean }
 	| { readonly kind: 'reasoning'; readonly text?: string; readonly availability: 'full' | 'summary' | 'redacted' | 'none'; readonly durationMs?: number }
-	| { readonly kind: 'toolCall'; readonly callId: string; readonly name: string; readonly displayName?: string; readonly input: unknown; readonly contributor?: string }
+	| { readonly kind: 'toolCall'; readonly callId: string; readonly name: string; readonly displayName?: string; readonly input: unknown; readonly contributor?: string; readonly message?: string }
 	| { readonly kind: 'toolOutput'; readonly callId: string; readonly stream?: 'stdout' | 'stderr' | 'content'; readonly text?: string; readonly ref?: IChatSessionContentRef; readonly totalChars: number; readonly truncated: boolean }
 	| { readonly kind: 'toolResult'; readonly callId: string; readonly status: 'completed' | 'failed' | 'cancelled' | 'denied' | 'timedOut'; readonly exitCode?: number; readonly durationMs?: number; readonly error?: string; readonly structured?: unknown }
 	| { readonly kind: 'edit'; readonly callId?: string; readonly uri: URI; readonly operation: 'modify' | 'create' | 'delete' | 'rename'; readonly newUri?: URI; readonly before?: IChatSessionContentRef; readonly after?: IChatSessionContentRef; readonly unifiedDiff: string; readonly added: number; readonly removed: number }
