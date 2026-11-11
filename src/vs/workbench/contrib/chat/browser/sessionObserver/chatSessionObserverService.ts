@@ -385,10 +385,15 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 		const widget = this.chatWidgetService.getWidgetBySessionResource(resource);
 		const log = await this.logs.get(resource);
 		const event = log?.events.find(e => e.id === eventId);
-		const requestId = event?.turnId?.startsWith('req:') ? event.turnId.slice(4) : eventId.startsWith('req:') ? eventId.slice(4) : undefined;
+		// The turn's request in the transcript: `req:<id>` from the chat model; an agent host's turn
+		// id is the request's id as it is.
+		const turnId = event?.turnId;
+		const requestId = turnId?.startsWith('req:') ? turnId.slice(4) : eventId.startsWith('req:') ? eventId.slice(4) : turnId;
 		const item = requestId ? widget?.viewModel?.getItems().find(i => i.id === requestId) : undefined;
 		if (widget && item) {
 			widget.reveal(item);
+		} else {
+			this.logService.info(`[sessionObserver] reveal ${eventId} in ${resource.toString()}: ${!widget ? 'no widget shows the session' : !event ? 'no such event' : 'its turn is not in the transcript'}`);
 		}
 	}
 
