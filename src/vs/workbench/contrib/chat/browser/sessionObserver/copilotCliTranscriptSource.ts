@@ -325,11 +325,10 @@ export class CopilotCliEventMapper {
 					this.mode = str(d.newMode) ?? this.mode;
 					push({ ...env(e.id), kind: 'modeChanged', mode: this.mode ?? '' });
 					break;
-				case 'model.model_call_success': {
-					const rs = (d.requestSettings ?? {}) as Record<string, unknown>;
-					push({ ...env(e.id), kind: 'modelCall', model: str(rs.model) ?? str(d.modelDisplayName) ?? this.model ?? '', ...(str(d.reasoningEffort) ? { reasoningEffort: str(d.reasoningEffort) } : {}) });
+				// One per agent request: every log has these, while model.* events cover only some requests or none.
+				case 'assistant.turn_start':
+					push({ ...env(e.id), kind: 'modelCall', model: this.model ?? '', ...(this.effort ? { reasoningEffort: this.effort } : {}) });
 					break;
-				}
 				case 'system.notification':
 					push({ ...env(e.id), kind: 'notification', text: str(d.content) ?? '', source: str((d.kind as Record<string, unknown> | undefined)?.type) ?? 'system' });
 					break;
