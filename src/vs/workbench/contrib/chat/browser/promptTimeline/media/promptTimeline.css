@@ -824,8 +824,8 @@
  * across the column reads as a break that sums up what came before, apart from the dots by its
  * orientation, and as wide as the accented dot so the column keeps one width. In the flyout, a row
  * between the prompt rows, the newest expanded, so the flyout reads as the session's story: what was
- * asked, and what came of it. Colour as the dots: grey, and the accent for the latest update (the notes
- * after the last prompt that has any), wherever the transcript is scrolled. */
+ * asked, and what came of it. Colour follows the dots: grey, and the accent for the notes after the
+ * prompt the transcript is scrolled to. */
 
 .prompt-timeline-gutter-mark {
 	width: calc(var(--prompt-timeline-gutter-dot-size) * 1.5);

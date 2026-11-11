@@ -250,7 +250,7 @@ suite('PromptTimelineGutterRail', () => {
 			transcriptChromeReceivesPointer: false,
 		});
 	});
-	test('places annotations where they happened: a dash between the dots, a row between the prompts, the newest expanded; the latest update accented wherever the transcript is', () => {
+	test('places annotations where they happened: a dash between the dots, a row between the prompts, the newest expanded; those after the active prompt accented', () => {
 		const rail = createRail([tick(0), tick(10), tick(20)]);
 		const rendered: string[] = [];
 		const note = (id: string, timestamp: number) => ({
@@ -267,18 +267,14 @@ suite('PromptTimelineGutterRail', () => {
 		const handle = () => Array.from(rail.domNode.querySelector('.prompt-timeline-gutter-rest')!.children).map((e: Element) =>
 			e.classList.contains('prompt-timeline-gutter-mark') ? `mark${e.classList.contains('current') ? '!' : ''}` : `dot${e.classList.contains('active') ? '!' : ''}`);
 		const currentRows = () => Array.from(rail.domNode.querySelectorAll('.prompt-timeline-gutter-annotation.current')).map(e => e.querySelector('.prompt-timeline-gutter-annotation-label')!.textContent);
-		assert.deepStrictEqual(handle(), ['dot', 'mark', 'dot', 'dot', 'mark!']);
+		assert.deepStrictEqual(handle(), ['dot', 'mark', 'dot', 'dot', 'mark']);
+		rail.setActive('20');
+		assert.deepStrictEqual(handle(), ['dot', 'mark', 'dot', 'dot!', 'mark!']);
 		assert.deepStrictEqual(currentRows(), ['note b']);
-		// Scrolled to an older prompt (the "you are here" dot moves): the latest update keeps the accent.
 		rail.setActive('0');
-		assert.deepStrictEqual(handle(), ['dot!', 'mark', 'dot', 'dot', 'mark!']);
-		assert.deepStrictEqual(currentRows(), ['note b']);
+		assert.deepStrictEqual(handle(), ['dot!', 'mark!', 'dot', 'dot', 'mark']);
+		assert.deepStrictEqual(currentRows(), ['note a']);
 
-		// Several notes after the same prompt are all the latest update, even when a newer prompt has none yet.
-		rail.setAnnotations([note('a', 5), note('c', 11), note('d', 12)]);
-		assert.deepStrictEqual(currentRows(), ['note c', 'note d']);
-		rendered.length = 0;
-		rail.setAnnotations([note('a', 5), note('b', 25)]);
 		rail.domNode.querySelector<HTMLButtonElement>('.prompt-timeline-gutter-annotation-head')!.click();
 		assert.deepStrictEqual(rendered, ['b', 'a']);
 
