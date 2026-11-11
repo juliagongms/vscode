@@ -286,6 +286,8 @@ export class AgentHostTranscriptProjector {
 	private readonly finished = new Set<string>();
 	/** Turns seen while in progress: their events are stamped when observed. */
 	private readonly liveTurns = new Set<string>();
+	/** How many times each turn was resumed (`ChatTurnResume`): a failed turn that runs again under its id. */
+	private readonly resumes = new Map<string, number>();
 	private readonly needed = new Map<string, IAgentHostContentRequest>();
 	private readonly consumed = new Set<string>();
 	private reads: string[] = [];
@@ -377,6 +379,15 @@ export class AgentHostTranscriptProjector {
 			previousModel = turn.message.model?.id ?? previousModel;
 		}
 		const active = state.activeTurn;
+		if (active && this.finished.has(active.id) && !this.dry) {
+			// Resumed: the last turn failed with a resumable error and runs again under its id
+			// (`ChatTurnResume` moves it back to the active turn). Reopen it, so its new work and its
+			// next end reach the log; what was already logged stays logged.
+			this.finished.delete(active.id);
+			const n = (this.resumes.get(active.id) ?? 0) + 1;
+			this.resumes.set(active.id, n);
+			out.push({ id: `start:${active.id}:resume${n}`, at: this.now(), turnId: active.id, rawType: 'turn/resume', kind: 'turnStarted', trigger: 'system' });
+		}
 		if (active && !this.finished.has(active.id)) {
 			if (!this.dry) {
 				this.liveTurns.add(active.id);
@@ -523,20 +534,24 @@ export class AgentHostTranscriptProjector {
 			return;
 		}
 		const error = completed.state === TurnState.Error ? getTurnError(completed) : undefined;
+		// A resumed turn ends again: each end is its own event.
+		const resumed = this.resumes.get(turnId);
+		const errId = resumed ? `err:${turnId}:resume${resumed}` : `err:${turnId}`;
+		const endId = resumed ? `end:${turnId}:resume${resumed}` : `end:${turnId}`;
 		if (error && !parts.some(p => p.kind === ResponsePartKind.Error)) {
-			this.once(`err:${turnId}`, out, () => ({ ...env(`err:${turnId}`, 'turn/error'), kind: 'error', message: error.message, code: error.errorType }));
+			this.once(errId, out, () => ({ ...env(errId, 'turn/error'), kind: 'error', message: error.message, code: error.errorType }));
 		}
-		this.once(`end:${turnId}`, out, () => {
+		this.once(endId, out, () => {
 			const when = turnEnd(completed) ?? at();
 			const last = parts.at(-1);
 			switch (completed.state) {
 				case TurnState.Cancelled:
-					return { ...env(`end:${turnId}`, `turn/${completed.state}`, when), kind: 'turnEnded', outcome: 'cancelled', cancelledBy: 'user' };
+					return { ...env(endId, `turn/${completed.state}`, when), kind: 'turnEnded', outcome: 'cancelled', cancelledBy: 'user' };
 				case TurnState.Error:
-					return { ...env(`end:${turnId}`, `turn/${completed.state}`, when), kind: 'turnEnded', outcome: 'failed', ...(error ? { reason: error.message } : {}) };
+					return { ...env(endId, `turn/${completed.state}`, when), kind: 'turnEnded', outcome: 'failed', ...(error ? { reason: error.message } : {}) };
 				default:
 					return {
-						...env(`end:${turnId}`, `turn/${completed.state}`, when), kind: 'turnEnded',
+						...env(endId, `turn/${completed.state}`, when), kind: 'turnEnded',
 						outcome: last?.kind === ResponsePartKind.InputRequest && last.response === undefined ? 'needsInput' : 'completed',
 					};
 			}

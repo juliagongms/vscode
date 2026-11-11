@@ -95,6 +95,22 @@ suite('AgentHostTranscriptSource', () => {
 		assert.deepStrictEqual(projector.project(snapshot([])), []);
 	});
 
+	test('a resumed turn (failed, then run again under its id) logs its new work and ends again', () => {
+		const { projector } = createProjector();
+		const failed: ResponsePart[] = [md('m1', 'Screening names.'), { kind: ResponsePartKind.Error, error: { errorType: 'network', message: 'Connection lost' }, resumable: true }];
+		const first = projector.project(snapshot([turn('t1', 0, msg('Screen these names'), failed, TurnState.Error)]));
+		assert.deepStrictEqual(only(first, 'turnEnded').map(e => [e.id, e.outcome]), [['end:t1', 'failed']]);
+
+		// ChatTurnResume moves the turn back to the active turn, with the parts it had.
+		const resumed = projector.project(snapshot([], active('t1', 0, msg('Screen these names'), [...failed, md('m2', 'Picking up where I left off.'), md('m3', 'Writing the report.')])));
+		assert.deepStrictEqual(resumed.map(e => [e.kind, e.id]), [['turnStarted', 'start:t1:resume1'], ['agentText', 'md:t1:m2']]);
+
+		const done = projector.project(snapshot([turn('t1', 0, msg('Screen these names'), [...failed, md('m2', 'Picking up where I left off.'), md('m3', 'Writing the report.')])]));
+		assert.deepStrictEqual(done.map(e => [e.kind, e.id]), [['agentText', 'md:t1:m3'], ['turnEnded', 'end:t1:resume1']]);
+		assert.strictEqual(only(done, 'turnEnded')[0].outcome, 'completed');
+		assert.deepStrictEqual(projector.project(snapshot([turn('t1', 0, msg('Screen these names'), [...failed, md('m2', 'Picking up where I left off.'), md('m3', 'Writing the report.')])])), []);
+	});
+
 	test('tool calls: input, output (large output stored out of line), denials, and the result', () => {
 		const { projector, stored } = createProjector();
 		const big = 'x'.repeat(20_000);
