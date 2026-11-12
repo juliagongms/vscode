@@ -15,10 +15,10 @@ import { IWorkbenchEnvironmentService } from '../../../../services/environment/c
 import { IChatWidget } from '../chat.js';
 import { IChatWidgetContrib, ChatWidget } from '../widget/chatWidget.js';
 import { ChatAgentLocation, ChatConfiguration } from '../../common/constants.js';
-import { MIN_RAIL_PROMPTS, PromptTimelineRailStyle, PROMPT_TIMELINE_CONTRIB_ID, PROMPT_TIMELINE_DISPLAY_SETTING, PROMPT_TIMELINE_STICKY_SCROLL_SETTING } from '../../common/promptTimeline.js';
+import { IPromptTimelineReveal, MIN_RAIL_PROMPTS, PromptTimelineRailStyle, PROMPT_TIMELINE_CONTRIB_ID, PROMPT_TIMELINE_DISPLAY_SETTING, PROMPT_TIMELINE_STICKY_SCROLL_SETTING } from '../../common/promptTimeline.js';
 import { PromptTimelineModel } from './promptTimelineModel.js';
 import { PromptTimelineGutterRail } from './promptTimelineGutterRail.js';
-import { IPromptTimelineAnnotation, IPromptTimelineRail } from './promptTimelineRail.js';
+import { annotationSlots, IPromptTimelineAnnotation, IPromptTimelineRail } from './promptTimelineRail.js';
 import { PromptTimelineRulerRail } from './promptTimelineRulerRail.js';
 import { PromptTimelineStickyHeader } from './promptTimelineStickyHeader.js';
 
@@ -61,13 +61,15 @@ export function isStickyPromptHeaderShown(widget: IChatWidget, configurationServ
  * (`sessions.chatTimeline.display`, Agents window only), and is torn down and re-created when a relevant
  * setting changes.
  */
-export class PromptTimelineWidgetContrib extends Disposable implements IChatWidgetContrib {
+export class PromptTimelineWidgetContrib extends Disposable implements IChatWidgetContrib, IPromptTimelineReveal {
 
 	static readonly ID = PROMPT_TIMELINE_CONTRIB_ID;
 	readonly id = PromptTimelineWidgetContrib.ID;
 
 	/** Holds the model and every surface's wiring while at least one surface is enabled. */
 	private readonly _enablement = this._register(new DisposableStore());
+	/** The model both surfaces share, while one is enabled. */
+	private _model: PromptTimelineModel | undefined;
 
 	constructor(
 		private readonly widget: IChatWidget,
@@ -116,6 +118,8 @@ export class PromptTimelineWidgetContrib extends Disposable implements IChatWidg
 		// CONTRIBS always constructs contribs with the concrete widget.
 		const concreteWidget = this.widget as ChatWidget;
 		const model = this._enablement.add(this.instantiationService.createInstance(PromptTimelineModel, concreteWidget));
+		this._model = model;
+		this._enablement.add(toDisposable(() => this._model = undefined));
 
 		// The host class provides the positioning context and layout variables both surfaces anchor to.
 		const host = this.widget.domNode;
@@ -128,6 +132,18 @@ export class PromptTimelineWidgetContrib extends Disposable implements IChatWidg
 		if (stickyEnabled) {
 			this._createStickyHeader(model);
 		}
+	}
+
+	revealPromptAt(timestamp: number): boolean {
+		const model = this._model;
+		const prompts = model?.promptTicks.get() ?? [];
+		if (!model || !prompts.length) {
+			return false;
+		}
+		// The slot the rail draws a note at, among every prompt; then the path choosing that prompt's mark takes.
+		const [slot] = annotationSlots(prompts.map(p => p.timestamp), [{ timestamp }]);
+		model.reveal(prompts[Math.max(0, slot)].requestId);
+		return true;
 	}
 
 	private _createRail(model: PromptTimelineModel, host: HTMLElement, railStyle: PromptTimelineRailStyle): void {

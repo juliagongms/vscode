@@ -177,6 +177,8 @@ export interface IChatSessionObserverService {
 
 	openSession(resource: URI): Promise<void>;
 	revealEvent(resource: URI, eventId: string): Promise<void>;
+	/** Opens the session and reveals the prompt its timeline shows a note written at `timestamp` under. */
+	revealPromptAt(resource: URI, timestamp: number): Promise<void>;
 	openEditDiff(resource: URI, eventId: string): Promise<void>;
 }
 

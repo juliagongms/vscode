@@ -4120,6 +4120,7 @@ export interface MainThreadChatSessionObserverShape extends IDisposable {
 	$fetchContent(handle: number, ref: IChatSessionContentRef): Promise<string>;
 	$openChatSession(resource: UriComponents): Promise<void>;
 	$revealChatSessionEvent(resource: UriComponents, eventId: string): Promise<void>;
+	$revealChatSessionPromptAt(resource: UriComponents, timestamp: number): Promise<void>;
 	$openChatSessionEditDiff(resource: UriComponents, eventId: string): Promise<void>;
 	$setChatInputSuggestion(resource: UriComponents, suggestion: IChatInputSuggestion | undefined): void;
 	$setChatSessionAnnotations(resource: UriComponents, annotations: IChatSessionAnnotationDto[]): void;

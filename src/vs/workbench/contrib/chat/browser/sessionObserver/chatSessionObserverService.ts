@@ -15,6 +15,8 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { ChatSessionStatus, isSessionInProgressStatus } from '../../common/chatSessionsService.js';
 import { ChatAgentLocation } from '../../common/constants.js';
+import { isRequestVM } from '../../common/model/chatViewModel.js';
+import { IPromptTimelineReveal, PROMPT_TIMELINE_CONTRIB_ID } from '../../common/promptTimeline.js';
 import { ActiveChatSessionHost, ChatSessionObservedStatus, IActiveChatSession, IChatSessionContentRef, IChatSessionEvent, IChatSessionEventInput, IChatSessionObservedInfo, IChatSessionObserverService, IChatSessionsObservedChangeEvent, IChatSessionTranscript, IChatSessionTranscriptSource } from '../../common/sessionObserver/chatSessionObserver.js';
 import { IAgentSession } from '../agentSessions/agentSessionsModel.js';
 import { IAgentSessionsService } from '../agentSessions/agentSessionsService.js';
@@ -24,6 +26,7 @@ import { AgentHostTranscriptSource } from './agentHostTranscriptSource.js';
 import { ChatModelTranscriptSource } from './chatModelTranscriptSource.js';
 import { CloudSessionTranscriptSource } from './cloudSessionTranscriptSource.js';
 import { CopilotCliTranscriptSource } from './copilotCliTranscriptSource.js';
+import type { IChatWidgetContrib } from '../widget/chatWidget.js';
 
 const DAY = 86_400_000;
 /** A log nobody observes is kept warm briefly, so quick re-observations don't reload it. */
@@ -394,6 +397,23 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 			widget.reveal(item);
 		} else {
 			this.logService.info(`[sessionObserver] reveal ${eventId} in ${resource.toString()}: ${!widget ? 'no widget shows the session' : !event ? 'no such event' : 'its turn is not in the transcript'}`);
+		}
+	}
+
+	async revealPromptAt(resource: URI, timestamp: number): Promise<void> {
+		await this.openSession(resource);
+		const widget = this.chatWidgetService.getWidgetBySessionResource(resource);
+		// Where the timeline is shown, its own path: the prompt it draws the note under, revealed as choosing that prompt does.
+		if (!widget || widget.getContrib<IChatWidgetContrib & IPromptTimelineReveal>(PROMPT_TIMELINE_CONTRIB_ID)?.revealPromptAt(timestamp)) {
+			if (!widget) {
+				this.logService.info(`[sessionObserver] reveal the prompt at ${timestamp} in ${resource.toString()}: no widget shows the session`);
+			}
+			return;
+		}
+		const requests = widget.viewModel?.getItems().filter(isRequestVM) ?? [];
+		const prompt = requests.filter(r => r.timestamp <= timestamp).at(-1) ?? requests[0];
+		if (prompt) {
+			widget.reveal(prompt, 0);
 		}
 	}
 

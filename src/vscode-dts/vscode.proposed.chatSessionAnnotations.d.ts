@@ -43,6 +43,15 @@ declare module 'vscode' {
 		export function setChatSessionAnnotations(session: Uri, annotations: readonly ChatSessionAnnotation[]): void;
 
 		/**
+		 * Opens a session and reveals the prompt its timeline shows a note written at `timestamp`
+		 * under (the last request made by then), as choosing that prompt on the timeline does.
+		 *
+		 * @param session The session's resource.
+		 * @param timestamp When the note was written, in milliseconds since the epoch.
+		 */
+		export function revealChatSessionPromptAt(session: Uri, timestamp: number): Thenable<void>;
+
+		/**
 		 * What a chat transcript shows when the user hovers a link to each of the given targets: a
 		 * rich link's tooltip (a pull request's, for example), a file's path, a web page's address;
 		 * an empty string for a command. For links shown outside chat that should read the same.

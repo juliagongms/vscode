@@ -113,6 +113,10 @@ export class MainThreadChatSessionObserver extends Disposable implements MainThr
 		return this.observer.revealEvent(URI.revive(resource), eventId);
 	}
 
+	$revealChatSessionPromptAt(resource: UriComponents, timestamp: number): Promise<void> {
+		return this.observer.revealPromptAt(URI.revive(resource), timestamp);
+	}
+
 	$openChatSessionEditDiff(resource: UriComponents, eventId: string): Promise<void> {
 		return this.observer.openEditDiff(URI.revive(resource), eventId);
 	}
