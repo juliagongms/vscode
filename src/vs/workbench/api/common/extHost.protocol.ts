@@ -102,6 +102,7 @@ import { IFileQueryBuilderOptions, ITextQueryBuilderOptions } from '../../servic
 import * as search from '../../services/search/common/search.js';
 import { AISearchKeyword, TextSearchCompleteMessage } from '../../services/search/common/searchExtTypes.js';
 import { ISaveProfileResult } from '../../services/userDataProfile/common/userDataProfile.js';
+import { IUserActivityEvent } from '../../services/userActivity/common/userActivityCapture.js';
 import { IExtHostDocumentSaveDelegate } from './extHostDocumentData.js';
 import { TerminalShellExecutionCommandLineConfidence } from './extHostTypes.js';
 import * as tasks from './shared/tasks.js';
@@ -4152,6 +4153,20 @@ export interface ExtHostChatSessionObserverShape {
 	$onDidSettleChatSessionNotification(handle: number, clicked: boolean): void;
 }
 
+// ---- User activity (proposed API userActivity) ----
+
+export type IUserActivityEventDto = Dto<IUserActivityEvent>;
+
+export interface MainThreadUserActivityShape extends IDisposable {
+	/** Starts capture while an extension of this host listens; stops it when none does. */
+	$setListening(listening: boolean): void;
+}
+
+export interface ExtHostUserActivityShape {
+	/** What the user did since the last batch. */
+	$acceptUserActivity(events: IUserActivityEventDto[]): void;
+}
+
 export interface MainThreadChatSessionsShape extends IDisposable {
 	$registerChatSessionItemController(controllerHandle: number, chatSessionType: string, supportsResolve: boolean): void;
 	$updateChatSessionItemControllerCapabilities(controllerHandle: number, supportsResolve: boolean): void;
@@ -4359,6 +4374,7 @@ export const MainContext = {
 	MainThreadDataChannels: createProxyIdentifier<MainThreadDataChannelsShape>('MainThreadDataChannels'),
 	MainThreadChatSessions: createProxyIdentifier<MainThreadChatSessionsShape>('MainThreadChatSessions'),
 	MainThreadChatSessionObserver: createProxyIdentifier<MainThreadChatSessionObserverShape>('MainThreadChatSessionObserver'),
+	MainThreadUserActivity: createProxyIdentifier<MainThreadUserActivityShape>('MainThreadUserActivity'),
 	MainThreadChatOutputRenderer: createProxyIdentifier<MainThreadChatOutputRendererShape>('MainThreadChatOutputRenderer'),
 	MainThreadChatContext: createProxyIdentifier<MainThreadChatContextShape>('MainThreadChatContext'),
 	MainThreadChatDebug: createProxyIdentifier<MainThreadChatDebugShape>('MainThreadChatDebug'),
@@ -4446,6 +4462,7 @@ export const ExtHostContext = {
 	ExtHostDataChannels: createProxyIdentifier<ExtHostDataChannelsShape>('ExtHostDataChannels'),
 	ExtHostChatSessions: createProxyIdentifier<ExtHostChatSessionsShape>('ExtHostChatSessions'),
 	ExtHostChatSessionObserver: createProxyIdentifier<ExtHostChatSessionObserverShape>('ExtHostChatSessionObserver'),
+	ExtHostUserActivity: createProxyIdentifier<ExtHostUserActivityShape>('ExtHostUserActivity'),
 	ExtHostChatQuota: createProxyIdentifier<ExtHostChatQuotaShape>('ExtHostChatQuota'),
 	ExtHostGitExtension: createProxyIdentifier<ExtHostGitExtensionShape>('ExtHostGitExtension'),
 	ExtHostBrowsers: createProxyIdentifier<ExtHostBrowsersShape>('ExtHostBrowsers'),

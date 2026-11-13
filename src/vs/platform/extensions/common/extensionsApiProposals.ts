@@ -570,6 +570,9 @@ const _allApiProposals = {
 	tunnels: {
 		proposal: 'https://raw.githubusercontent.com/microsoft/vscode/main/src/vscode-dts/vscode.proposed.tunnels.d.ts',
 	},
+	userActivity: {
+		proposal: 'https://raw.githubusercontent.com/microsoft/vscode/main/src/vscode-dts/vscode.proposed.userActivity.d.ts',
+	},
 	valueSelectionInQuickPick: {
 		proposal: 'https://raw.githubusercontent.com/microsoft/vscode/main/src/vscode-dts/vscode.proposed.valueSelectionInQuickPick.d.ts',
 	},

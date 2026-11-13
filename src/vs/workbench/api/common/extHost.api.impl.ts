@@ -42,6 +42,7 @@ import { ExtHostChatArtifactIntegrations } from './extHostChatArtifactIntegratio
 import { ExtHostChatOutputRenderer } from './extHostChatOutputRenderer.js';
 import { ExtHostChatSessions } from './extHostChatSessions.js';
 import { ExtHostChatSessionObserver } from './extHostChatSessionObserver.js';
+import { ExtHostUserActivity } from './extHostUserActivity.js';
 import { ExtHostChatStatus } from './extHostChatStatus.js';
 import { ExtHostChatQuota } from './extHostChatQuota.js';
 import { ExtHostChatInputNotification } from './extHostChatInputNotification.js';
@@ -253,6 +254,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 	const extHostCustomEditors = rpcProtocol.set(ExtHostContext.ExtHostCustomEditors, new ExtHostCustomEditors(rpcProtocol, extHostDocuments, extensionStoragePaths, extHostWebviews, extHostWebviewPanels));
 	const extHostWebviewViews = rpcProtocol.set(ExtHostContext.ExtHostWebviewViews, new ExtHostWebviewViews(rpcProtocol, extHostWebviews));
 	const extHostChatSessionObserver = rpcProtocol.set(ExtHostContext.ExtHostChatSessionObserver, new ExtHostChatSessionObserver(rpcProtocol, extHostWebviewViews));
+	const extHostUserActivity = rpcProtocol.set(ExtHostContext.ExtHostUserActivity, new ExtHostUserActivity(rpcProtocol));
 	const extHostTesting = rpcProtocol.set(ExtHostContext.ExtHostTesting, accessor.get(IExtHostTesting));
 	const extHostUriOpeners = rpcProtocol.set(ExtHostContext.ExtHostUriOpeners, new ExtHostUriOpeners(rpcProtocol));
 	const extHostProfileContentHandlers = rpcProtocol.set(ExtHostContext.ExtHostProfileContentHandlers, new ExtHostProfileContentHandlers(rpcProtocol));
@@ -1031,6 +1033,10 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			},
 			onDidChangeActiveColorTheme(listener, thisArg?, disposables?) {
 				return _asExtensionEvent(extHostTheming.onDidChangeActiveColorTheme)(listener, thisArg, disposables);
+			},
+			onDidRecordUserActivity(listener, thisArg?, disposables?) {
+				checkProposedApiEnabled(extension, 'userActivity');
+				return _asExtensionEvent(extHostUserActivity.onDidRecordUserActivity)(listener, thisArg, disposables);
 			},
 			registerWebviewViewProvider(viewId: string, provider: vscode.WebviewViewProvider, options?: {
 				webviewOptions?: {
@@ -2403,6 +2409,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			ChatDraftRequestState: extHostTypes.ChatDraftRequestState,
 			ChatDraftRequestOutcome: extHostTypes.ChatDraftRequestOutcome,
 			ChatSessionNotificationSkipReason: extHostTypes.ChatSessionNotificationSkipReason,
+			UserActivityKind: extHostTypes.UserActivityKind,
 			ChatSessionCustomizationType: extHostTypes.ChatSessionCustomizationType,
 			ChatDebugLogLevel: extHostTypes.ChatDebugLogLevel,
 			ChatDebugToolCallResult: extHostTypes.ChatDebugToolCallResult,

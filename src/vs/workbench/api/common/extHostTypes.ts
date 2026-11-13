@@ -4586,4 +4586,21 @@ export enum ChatSessionNotificationSkipReason {
 	Off = 2,
 }
 
+export enum UserActivityKind {
+	Focus = 1,
+	Click = 2,
+	Selection = 3,
+	Type = 4,
+	Copy = 5,
+	Cut = 6,
+	Paste = 7,
+	Command = 8,
+	OpenEditor = 9,
+	SessionSwitch = 10,
+	Browser = 11,
+	Terminal = 12,
+	WindowFocus = 13,
+	Search = 14,
+}
+
 //#endregion
