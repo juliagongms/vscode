@@ -199,6 +199,10 @@ export class CopilotCliEventMapper {
 					this.lastTurnEnded = false;
 					this.lastMainHadTools = false;
 					this.openQuestion = undefined;
+					// A message sent to an idle agent means nothing it started still runs, even a tool whose completion was never logged.
+					if (delivery === 'idle') {
+						this.runningMain.clear();
+					}
 					break;
 				}
 				case 'assistant.message': {
@@ -342,6 +346,8 @@ export class CopilotCliEventMapper {
 					push({ ...env(e.id), kind: 'notification', text: `skill invoked: ${str(d.skill) ?? str(d.name) ?? ''}`, source: 'skill' });
 					break;
 				case 'abort':
+					// An abort kills the tools the turn had running, and their completions are never logged.
+					this.runningMain.clear();
 					if (this.currentTurn && !this.lastTurnEnded) {
 						push({ ...env(e.id), kind: 'turnEnded', outcome: 'cancelled', cancelledBy: 'user', ...(str(d.reason) ? { reason: str(d.reason) } : {}) });
 						this.endTurn(at);
@@ -362,6 +368,9 @@ export class CopilotCliEventMapper {
 						push({ ...env(e.id), kind: 'turnEnded', outcome: 'needsInput' });
 						this.endTurn(at);
 					}
+					break;
+				case 'session.shutdown':
+					this.runningMain.clear();
 					break;
 				default:
 					// hook.*, usage and model telemetry, binary assets, instruction updates: runtime plumbing, not transcript.

@@ -76,6 +76,22 @@ suite('chatSessionObserver', () => {
 		assert.strictEqual(m.repository, 'acme/pay');
 	});
 
+	test('the CLI mapper still sees hand-backs after a tool that never logged its completion', () => {
+		const handBack = (s: number) => [ev('assistant.message', s, { content: 'Done. Commit?' }), ev('assistant.turn_end', s + 1, {})];
+		const orphan = (s: number) => [ev('assistant.message', s, { content: '', toolRequests: [{ toolCallId: `o${s}`, name: 'bash', arguments: { command: 'sleep 999' } }] }), ev('tool.execution_start', s + 1, { toolCallId: `o${s}`, toolName: 'bash', arguments: {} })];
+		for (const cut of ['abort', 'session.shutdown']) {
+			n = 0;
+			const m = new CopilotCliEventMapper();
+			m.map([ev('user.message', 1, { content: 'go', delivery: 'idle' }), ...orphan(2), ev(cut, 4, {}), ev('user.message', 5, { content: 'try again' }), ...handBack(6)]);
+			assert.strictEqual(m.status, 'waiting', cut);
+		}
+		n = 0;
+		const m = new CopilotCliEventMapper();
+		const out = m.map([ev('user.message', 1, { content: 'go', delivery: 'idle' }), ...orphan(2), ...handBack(4), ev('user.message', 6, { content: 'next', delivery: 'idle' }), ...handBack(7)]);
+		assert.strictEqual(out.filter(e => e.kind === 'turnEnded').length, 1);
+		assert.strictEqual(m.status, 'waiting');
+	});
+
 	test('drafts: one per session per owner, edit then send resolves with the edit', () => {
 		const drafts = store.add(new ChatDraftRequestService());
 		const resolved: IChatDraftResolution[] = [];
