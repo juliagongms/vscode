@@ -30,6 +30,21 @@ function lines(s: string): number {
 }
 
 /**
+ * How long an open response's agent stays quiet after its last words, with none of its tools
+ * running, before the turn counts as handed back while background shells keep it open.
+ */
+const QUIET_HAND_BACK_MS = 3_000;
+/** The same with no background shell: a response normally completes within a second of its last words. */
+const QUIET_HAND_BACK_UNLISTED_MS = 15_000;
+
+/** What changes when the agent does more: the parts, the last one's text, and how many tool calls are done. */
+function partsShape(parts: IChatResponseModel['entireResponse']['value']): string {
+	const last = parts.at(-1);
+	const done = parts.filter(p => (p.kind === 'toolInvocation' || p.kind === 'toolInvocationSerialized') && IChatToolInvocation.isComplete(p)).length;
+	return `${parts.length}:${last?.kind === 'markdownContent' ? text(last.content).length : last?.kind ?? ''}:${done}`;
+}
+
+/**
  * Projects a `ChatModel` into the event log: every request and every response part, each
  * emitted once when it closes. The source for local sessions, and the fallback for any
  * session whose content is loaded into a `ChatModel`.
@@ -38,6 +53,12 @@ export class ChatModelProjector {
 	private readonly emitted = new Set<string>();
 	private lastPending = '[]';
 	private lastTodos = '';
+	/** The open response's agent fell quiet after its last words: since when, and how its parts looked. */
+	private quiet: { turnId: string; shape: string; since: number; wait: number } | undefined;
+	/** The open response that ended for the user while its host kept it open: how its parts looked then. */
+	private quietEnd: { turnId: string; shape: string; n: number } | undefined;
+	private readonly quietEnds = new Map<string, number>();
+	private readonly now: () => number;
 
 	/**
 	 * @param options.indexIds Key turns by their index, parts by their position and text by its
@@ -48,8 +69,10 @@ export class ChatModelProjector {
 		private model: IChatModel,
 		private readonly sink: IChatSessionTranscriptSink,
 		private readonly todos: () => readonly { id: string; title: string; status: 'not-started' | 'in-progress' | 'completed' }[],
-		private readonly options: { readonly indexIds?: boolean } = {},
-	) { }
+		private readonly options: { readonly indexIds?: boolean; readonly now?: () => number } = {},
+	) {
+		this.now = options.now ?? Date.now;
+	}
 
 	/** Projects a reloaded model of the same session; what was emitted stays emitted. */
 	setModel(model: IChatModel): void {
@@ -61,7 +84,7 @@ export class ChatModelProjector {
 			return 'question';
 		}
 		if (this.model.hasActiveRequest.get()) {
-			return 'working';
+			return this.quietEnd && this.quietEnd.turnId === this.turnIdOf(this.model.lastRequest) ? 'waiting' : 'working';
 		}
 		const last = this.model.lastRequest?.response;
 		return last?.isCanceled ? 'cancelled' : last?.result?.errorDetails ? 'failed' : 'waiting';
@@ -85,6 +108,18 @@ export class ChatModelProjector {
 			...(last?.modelId ? { model: last.modelId } : {}),
 			...(last?.modeInfo?.telemetryModeName ?? last?.modeInfo?.telemetryModeId ? { mode: (last?.modeInfo?.telemetryModeName ?? last?.modeInfo?.telemetryModeId)! } : {}),
 		});
+	}
+
+	/** When to flush again to see whether the quiet open response has handed back. */
+	get quietCheckInMs(): number | undefined {
+		return this.quiet ? Math.max(0, this.quiet.since + this.quiet.wait - this.now()) : undefined;
+	}
+
+	private turnIdOf(r: IChatRequestModel | undefined): string | undefined {
+		if (!r) {
+			return undefined;
+		}
+		return this.options.indexIds ? `t:${this.model.getRequests().indexOf(r)}` : `req:${r.id}`;
 	}
 
 	private once(key: string, fn: () => void): void {
@@ -125,6 +160,11 @@ export class ChatModelProjector {
 	private projectResponse(response: IChatResponseModel, turnId: string, out: IChatSessionEventInput[]): void {
 		const parts = response.entireResponse.value;
 		const done = response.isComplete;
+		// A turn that handed back while its host kept it open, where the agent works again: it is open until its next end.
+		if (this.quietEnd?.turnId === turnId && !done && partsShape(parts) !== this.quietEnd.shape) {
+			out.push({ id: `${turnId}:quiet${this.quietEnd.n}`, at: this.now(), turnId, kind: 'turnStarted', trigger: 'system' });
+			this.quietEnd = undefined;
+		}
 		let mdStart = -1;
 		let md = '';
 		const closeMarkdown = (index: number) => {
@@ -228,8 +268,19 @@ export class ChatModelProjector {
 					break;
 			}
 		});
+		if (!done) {
+			this.projectQuietHandBack(parts, turnId, out, () => closeMarkdown(parts.length));
+		}
 		if (done) {
 			closeMarkdown(parts.length);
+			if (this.quietEnd?.turnId === turnId) {
+				const quietEnd = this.quietEnd;
+				this.quietEnd = undefined;
+				// It ended for the user at its quiet hand-back; the host closing it later adds nothing.
+				if (!response.isCanceled && !response.result?.errorDetails && partsShape(parts) === quietEnd.shape) {
+					this.emitted.add(`end:${turnId}`);
+				}
+			}
 			this.once(`end:${turnId}`, () => out.push({
 				id: `end:${turnId}`, at: response.completedAt ?? Date.now(), turnId, kind: 'turnEnded',
 				outcome: response.isCanceled ? 'cancelled' : response.result?.errorDetails ? 'failed' : 'completed',
@@ -240,6 +291,39 @@ export class ChatModelProjector {
 				this.once(`err:${turnId}`, () => out.push({ id: `err:${turnId}`, at: response.completedAt ?? Date.now(), turnId, kind: 'error', message: response.result!.errorDetails!.message, ...(response.result!.errorDetails!.code ? { code: response.result!.errorDetails!.code } : {}) }));
 			}
 		}
+	}
+
+	/**
+	 * The agent's last words, with none of its tools running, while its host keeps the response open
+	 * (for a background shell, say): after a quiet spell the turn ends for the user, a hand-back.
+	 */
+	private projectQuietHandBack(parts: IChatResponseModel['entireResponse']['value'], turnId: string, out: IChatSessionEventInput[], closeLastWords: () => void): void {
+		if (turnId !== this.turnIdOf(this.model.lastRequest) || this.quietEnd?.turnId === turnId) {
+			return;
+		}
+		const last = parts.at(-1);
+		const running = parts.some(p => p.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(p));
+		if (last?.kind !== 'markdownContent' || !text(last.content).trim() || running || this.model.requestNeedsInput.get()) {
+			this.quiet = undefined;
+			return;
+		}
+		const now = this.now();
+		const wait = (this.model.backgroundShellCount?.get() ?? 0) > 0 ? QUIET_HAND_BACK_MS : QUIET_HAND_BACK_UNLISTED_MS;
+		const shape = partsShape(parts);
+		if (this.quiet?.turnId !== turnId || this.quiet.shape !== shape) {
+			this.quiet = { turnId, shape, since: now, wait };
+			return;
+		}
+		this.quiet.wait = wait;
+		if (now - this.quiet.since < wait) {
+			return;
+		}
+		closeLastWords();
+		const n = (this.quietEnds.get(turnId) ?? 0) + 1;
+		this.quietEnds.set(turnId, n);
+		this.once(`end:${turnId}:quiet${n}`, () => out.push({ id: `end:${turnId}:quiet${n}`, at: now, turnId, kind: 'turnEnded', outcome: 'needsInput' }));
+		this.quietEnd = { turnId, shape, n };
+		this.quiet = undefined;
 	}
 
 	private projectTool(part: IChatToolInvocation | IChatToolInvocationSerialized, turnId: string, out: IChatSessionEventInput[], stableCallId?: string): void {
@@ -342,7 +426,18 @@ export class ChatModelTranscriptSource extends Disposable implements IChatSessio
 		store.add(ref);
 		const model = ref.object;
 		const projector = new ChatModelProjector(model, sink, () => this.todoListService.getTodos(resource).map(t => ({ id: String(t.id), title: t.title, status: t.status })));
-		const scheduler = store.add(new RunOnceScheduler(() => projector.flush(), 150));
+		// A quiet open response is flushed again once its wait is over, though nothing changed.
+		const quietCheck = store.add(new RunOnceScheduler(() => flush(), 150));
+		const flush = () => {
+			projector.flush();
+			const quietIn = projector.quietCheckInMs;
+			if (quietIn === undefined) {
+				quietCheck.cancel();
+			} else if (!quietCheck.isScheduled()) {
+				quietCheck.schedule(quietIn + 150);
+			}
+		};
+		const scheduler = store.add(new RunOnceScheduler(() => flush(), 150));
 		const responses = store.add(new DisposableMap<string>());
 		const watchResponses = () => {
 			for (const r of model.getRequests()) {
@@ -352,7 +447,7 @@ export class ChatModelTranscriptSource extends Disposable implements IChatSessio
 			}
 		};
 		watchResponses();
-		projector.flush();
+		flush();
 		store.add(model.onDidChange(() => {
 			watchResponses();
 			scheduler.schedule();

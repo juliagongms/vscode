@@ -290,6 +290,72 @@ suite('chatSessionObserver', () => {
 		assert.deepStrictEqual(appended.slice(4).map(e => [e.kind, e.turnId]), [['turnStarted', 't:1'], ['userMessage', 't:1'], ['agentText', 't:1'], ['turnEnded', 't:1']]);
 	});
 
+	test('an open response its host keeps open for a background shell ends for the user once the agent falls quiet', () => {
+		let clock = 1_000_000;
+		let shells = 1;
+		const md = (value: string) => ({ kind: 'markdownContent', content: { value } });
+		const tool = (id: string, complete: boolean) => ({ kind: 'toolInvocationSerialized', toolCallId: id, toolId: 'bash', invocationMessage: 'sleep 100', isComplete: complete, isConfirmed: { type: 1 }, presentation: undefined, resultDetails: undefined, source: undefined, toolSpecificData: undefined });
+		const response = { entireResponse: { value: [tool('c1', true), md('Started `sleep 100` in the background and left it running.')] as unknown[] }, isComplete: false, completedAt: undefined as number | undefined, isCanceled: false, result: {} };
+		const request = { id: 'r1', timestamp: clock, message: { text: 'Start sleep 100 in the background' }, variableData: { variables: [] }, isSystemInitiated: false, response };
+		let active = true;
+		const model = {
+			getRequests: () => [request], getPendingRequests: () => [], lastRequest: request, lastMessageDate: clock,
+			requestNeedsInput: { get: () => undefined }, hasActiveRequest: { get: () => active }, backgroundShellCount: { get: () => shells },
+		} as unknown as IChatModel;
+		const appended: IChatSessionEventInput[] = [];
+		const info: unknown[] = [];
+		const sink: IChatSessionTranscriptSink = { append: e => appended.push(...e), patchInfo: i => info.push(i), storeContent: text => ({ id: String(text.length), size: text.length }) };
+		const projector = new ChatModelProjector(model, sink, () => [], { now: () => clock });
+
+		projector.flush();
+		assert.strictEqual(projector.status, 'working');
+		assert.strictEqual(projector.quietCheckInMs, 3_000);
+		assert.deepStrictEqual(appended.filter(e => e.kind === 'turnEnded' || e.kind === 'agentText'), []);
+
+		clock += 3_000;
+		projector.flush();
+		assert.deepStrictEqual(appended.slice(-2).map(e => [e.kind, e.id]), [['agentText', 'md:req:r1:1'], ['turnEnded', 'end:req:r1:quiet1']]);
+		assert.strictEqual(projector.status, 'waiting');
+		assert.strictEqual((info.at(-1) as { status: string }).status, 'waiting');
+
+		// The shell finishes and the host closes the response with nothing new: no second end.
+		active = false;
+		shells = 0;
+		response.isComplete = true;
+		response.completedAt = clock + 60_000;
+		const before = appended.length;
+		projector.flush();
+		assert.deepStrictEqual(appended.slice(before), []);
+	});
+
+	test('a quiet response reopens when the agent works again, and waits longer with no background shell', () => {
+		let clock = 1_000_000;
+		const md = (value: string) => ({ kind: 'markdownContent', content: { value } });
+		const tool = (id: string, complete: boolean) => ({ kind: 'toolInvocationSerialized', toolCallId: id, toolId: 'read_bash', invocationMessage: 'read', isComplete: complete, isConfirmed: { type: 1 }, presentation: undefined, resultDetails: undefined, source: undefined, toolSpecificData: undefined });
+		const response = { entireResponse: { value: [md('Done. Anything else?')] as unknown[] }, isComplete: false, completedAt: undefined, isCanceled: false, result: {} };
+		const request = { id: 'r1', timestamp: clock, message: { text: 'Ship it' }, variableData: { variables: [] }, isSystemInitiated: false, response };
+		const model = {
+			getRequests: () => [request], getPendingRequests: () => [], lastRequest: request, lastMessageDate: clock,
+			requestNeedsInput: { get: () => undefined }, hasActiveRequest: { get: () => true },
+		} as unknown as IChatModel;
+		const appended: IChatSessionEventInput[] = [];
+		const sink: IChatSessionTranscriptSink = { append: e => appended.push(...e), patchInfo: () => { }, storeContent: text => ({ id: String(text.length), size: text.length }) };
+		const projector = new ChatModelProjector(model, sink, () => [], { now: () => clock });
+		projector.flush();
+		clock += 3_000;
+		projector.flush();
+		assert.ok(!appended.some(e => e.kind === 'turnEnded'));
+		clock += 12_000;
+		projector.flush();
+		assert.deepStrictEqual(appended.filter(e => e.kind === 'turnEnded').map(e => e.id), ['end:req:r1:quiet1']);
+
+		response.entireResponse.value = [md('Done. Anything else?'), tool('c2', false)];
+		const before = appended.length;
+		projector.flush();
+		assert.deepStrictEqual(appended.slice(before)[0], { id: 'req:r1:quiet1', at: clock, turnId: 'req:r1', kind: 'turnStarted', trigger: 'system' });
+		assert.strictEqual(projector.status, 'working');
+	});
+
 	test('annotations: per owner, merged in time order, and gone with their owner', () => {
 		const service = store.add(new ChatSessionAnnotationService());
 		const session = URI.parse('agent-host-copilotcli:/s9');
