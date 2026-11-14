@@ -186,6 +186,9 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 
 	/** A widget switched sessions: show the new one's suggestion, or put the input back as configured. */
 	private syncWidget(w: IChatWidget): void {
+		// The input keeps an inline completion that is still valid (forward stability), so the last
+		// session's suggestion would stay over this one's until the user typed.
+		InlineCompletionsController.get(w.inputEditor)?.model.get()?.stop();
 		if (this.entryFor(w)) {
 			this.showIn(w);
 		} else {

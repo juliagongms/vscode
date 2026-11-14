@@ -25,6 +25,7 @@ import { ChatSessionAnnotationService } from '../../../browser/sessionObserver/c
 import { ChatSessionAttentionService } from '../../../browser/sessionObserver/chatSessionAttentionService.js';
 import { IHostService } from '../../../../../services/host/browser/host.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
+import { observableValue } from '../../../../../../base/common/observable.js';
 import { ChatConfiguration } from '../../../common/constants.js';
 import { IChatModel } from '../../../common/model/chatModel.js';
 
@@ -225,6 +226,45 @@ suite('chatSessionObserver', () => {
 		assert.deepStrictEqual(states.map(s => s.state), ['shown', 'rejected']);
 		service.setSuggestion('ext', session, { id: 'r2', text: 'Pick Helmsignal.' });
 		assert.strictEqual((await provide())?.insertText, 'Pick Helmsignal.');
+	});
+
+	test('input suggestions: a widget switching sessions drops the last session\'s ghost text before showing the new one\'s', async () => {
+		const a = URI.parse('agent-host-copilotcli:/a');
+		const b = URI.parse('agent-host-copilotcli:/b');
+		const input = store.add(createTextModel('', null, undefined, URI.from({ scheme: Schemas.vscodeChatInput, path: '/input-3' })));
+		const calls: string[] = [];
+		const inline = { stop: () => calls.push('stop'), trigger: () => calls.push('trigger'), state: observableValue('state', undefined) };
+		const controller = { model: observableValue('model', inline) };
+		const switched = store.add(new Emitter<void>());
+		const widget = {
+			viewModel: { sessionResource: a, model: { hasRequests: true } }, visible: true, onDidShow: Event.None, onDidChangeViewModel: switched.event,
+			inputEditor: { getModel: () => input, hasTextFocus: () => false, onDidFocusEditorText: Event.None, updateOptions: () => { }, getOption: () => '', getContribution: () => controller },
+		} as unknown as IChatWidget & { viewModel: { sessionResource: URI } };
+		const widgets = { getAllWidgets: () => [widget], onDidAddWidget: Event.None, onDidRemoveWidget: Event.None } as unknown as IChatWidgetService;
+		const observer = { activeSessions: [{ resource: a, host: 'agentsWindow' }, { resource: b, host: 'agentsWindow' }] } as unknown as IChatSessionObserverService;
+		const features = new LanguageFeaturesService();
+		const service = store.add(new ChatInputSuggestionService(features, widgets, { onDidAcceptRequest: Event.None } as unknown as IChatService, observer, store.add(new ChatDraftRequestService()), new TestConfigurationService()));
+		const ctx = { triggerKind: InlineCompletionTriggerKind.Automatic, selectedSuggestionInfo: undefined, includeInlineEdits: false, includeInlineCompletions: true, requestIssuedDateTime: 0, earliestShownDateTime: 0 } as never;
+		const provide = async () => (await features.inlineCompletionsProvider.all(input)[0].provideInlineCompletions(input, input.getFullModelRange().getEndPosition(), ctx, CancellationToken.None))?.items[0];
+
+		service.setSuggestion('ext', a, { id: 'ra', text: 'Ship the redesign.' });
+		service.setSuggestion('ext', b, { id: 'rb', text: 'Test the contact form.' });
+		assert.strictEqual((await provide())?.insertText, 'Ship the redesign.');
+
+		calls.length = 0;
+		widget.viewModel.sessionResource = b;
+		switched.fire();
+		// Stopped first, so the input asks again rather than keep A's still-valid item.
+		assert.deepStrictEqual(calls.slice(0, 2), ['stop', 'trigger']);
+		assert.strictEqual((await provide())?.insertText, 'Test the contact form.');
+
+		// To a session with no suggestion: the last one's ghost text is dropped all the same.
+		service.setSuggestion('ext', a, undefined);
+		calls.length = 0;
+		widget.viewModel.sessionResource = a;
+		switched.fire();
+		assert.strictEqual(calls[0], 'stop');
+		assert.strictEqual(await provide(), undefined);
 	});
 
 	test('a reloaded model mints new request IDs; index IDs emit only what is new', () => {
