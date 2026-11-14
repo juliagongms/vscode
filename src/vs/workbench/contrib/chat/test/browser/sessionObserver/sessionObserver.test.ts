@@ -8,7 +8,7 @@ import { URI } from '../../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { ChatDraftRequestService } from '../../../browser/sessionObserver/chatDraftRequestService.js';
 import { CopilotCliEventMapper, cliUserOrigin } from '../../../browser/sessionObserver/copilotCliTranscriptSource.js';
-import { chatSessionAttentionRegistry, IChatDraftResolution, IChatInputSuggestionEvent, IChatRequestSubmission, IChatSessionEventInput, IChatSessionObserverService, IChatSessionTranscriptSink } from '../../../common/sessionObserver/chatSessionObserver.js';
+import { chatSessionAttentionRegistry, IChatDraftResolution, IChatInputSuggestionEvent, IChatRequestSubmission, IChatSessionEventInput, IChatSessionObservedInfo, IChatSessionObserverService, IChatSessionsObservedChangeEvent, IChatSessionTranscriptSink } from '../../../common/sessionObserver/chatSessionObserver.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
 import { Schemas } from '../../../../../../base/common/network.js';
@@ -28,6 +28,8 @@ import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { observableValue } from '../../../../../../base/common/observable.js';
 import { ChatConfiguration } from '../../../common/constants.js';
 import { IChatModel } from '../../../common/model/chatModel.js';
+import { ChatSessionObserverService } from '../../../browser/sessionObserver/chatSessionObserverService.js';
+import { NullLogService } from '../../../../../../platform/log/common/log.js';
 
 suite('chatSessionObserver', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -354,6 +356,33 @@ suite('chatSessionObserver', () => {
 		projector.flush();
 		assert.deepStrictEqual(appended.slice(before)[0], { id: 'req:r1:quiet1', at: clock, turnId: 'req:r1', kind: 'turnStarted', trigger: 'system' });
 		assert.strictEqual(projector.status, 'working');
+	});
+
+	test('session list: a window\'s own list joins the agent sessions model\'s, which wins on the same session', async () => {
+		const info = (resource: string, title: string): IChatSessionObservedInfo => ({
+			resource: URI.parse(resource), provider: 'agentHost', title, status: 'waiting', createdAt: 1, lastActivityAt: Date.now(), readState: { isRead: true }, archived: false,
+			capabilities: { steering: true, queueing: true, inputSuggestions: true, questions: true, planReview: true },
+			fidelity: { reasoning: 'none', toolOutput: 'truncated', diffs: 'none', timestamps: 'perTurn', modelCalls: false, liveWithoutWidget: false, liveLatencyMs: 0 },
+		});
+		const agentSession = { resource: URI.parse('agent-host-copilotcli:/b'), providerType: 'agent-host', label: 'From the model', status: 1, timing: { created: 1, lastRequestEnded: Date.now() }, isRead: () => true, isArchived: () => false };
+		const model = { resolved: true, sessions: [agentSession], onDidResolve: Event.None, onDidChangeSessions: Event.None, onDidChangeSessionArchivedState: Event.None };
+		const widgets = { onDidAddWidget: Event.None, onDidChangeFocusedWidget: Event.None, onDidChangeFocusedSession: Event.None, getAllWidgets: () => [], lastFocusedWidget: undefined };
+		const source = { priority: 0, canObserve: () => false, observe: async () => ({ dispose() { } }), dispose() { } };
+		const observer = store.add(new ChatSessionObserverService(
+			{ model } as never, widgets as never, { onDidChangeFocus: Event.None, hasFocus: false } as never, { isSessionsWindow: true } as never, {} as never,
+			{ createInstance: () => source } as never, new NullLogService(),
+		));
+		const changed = store.add(new Emitter<void>());
+		let listed = [info('agent-host-copilotcli:/a', 'Only in the window'), info('agent-host-copilotcli:/b', 'From the window')];
+		store.add(observer.registerSessionList({ onDidChange: changed.event, getSessions: () => listed }));
+		const titles = async () => (await observer.getSessions()).map(i => i.title).sort();
+		assert.deepStrictEqual(await titles(), ['From the model', 'Only in the window']);
+		const events: IChatSessionsObservedChangeEvent[] = [];
+		store.add(observer.onDidChangeSessions(e => events.push(e)));
+		listed = [...listed, info('agent-host-copilotcli:/c', 'New in the window')];
+		changed.fire();
+		assert.deepStrictEqual(events.map(e => e.added.map(i => i.title)), [['New in the window']]);
+		assert.deepStrictEqual(await titles(), ['From the model', 'New in the window', 'Only in the window']);
 	});
 
 	test('annotations: per owner, merged in time order, and gone with their owner', () => {

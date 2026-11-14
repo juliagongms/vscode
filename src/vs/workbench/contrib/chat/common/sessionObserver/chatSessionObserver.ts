@@ -161,6 +161,12 @@ export interface IChatSessionTranscriptSource {
 	observe(resource: URI, sink: IChatSessionTranscriptSink): Promise<IDisposable>;
 }
 
+/** A session list beside the agent sessions model (the Agents Window's own), merged into `getSessions`. */
+export interface IChatSessionObservedList {
+	readonly onDidChange: Event<void>;
+	getSessions(): readonly IChatSessionObservedInfo[];
+}
+
 export const IChatSessionObserverService = createDecorator<IChatSessionObserverService>('chatSessionObserverService');
 
 export interface IChatSessionObserverService {
@@ -171,6 +177,8 @@ export interface IChatSessionObserverService {
 	/** Ref-counted: every observation of a session shares one log. */
 	observe(resource: URI): Promise<IChatSessionTranscript>;
 	registerSource(source: IChatSessionTranscriptSource): IDisposable;
+	/** Adds sessions a window lists outside the agent sessions model. */
+	registerSessionList(list: IChatSessionObservedList): IDisposable;
 
 	readonly activeSessions: readonly IActiveChatSession[];
 	readonly onDidChangeActiveSessions: Event<readonly IActiveChatSession[]>;

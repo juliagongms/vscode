@@ -17,7 +17,7 @@ import { ChatSessionStatus, isSessionInProgressStatus } from '../../common/chatS
 import { ChatAgentLocation } from '../../common/constants.js';
 import { isRequestVM } from '../../common/model/chatViewModel.js';
 import { IPromptTimelineReveal, PROMPT_TIMELINE_CONTRIB_ID } from '../../common/promptTimeline.js';
-import { ActiveChatSessionHost, ChatSessionObservedStatus, IActiveChatSession, IChatSessionContentRef, IChatSessionEvent, IChatSessionEventInput, IChatSessionObservedInfo, IChatSessionObserverService, IChatSessionsObservedChangeEvent, IChatSessionTranscript, IChatSessionTranscriptSource } from '../../common/sessionObserver/chatSessionObserver.js';
+import { ActiveChatSessionHost, ChatSessionObservedStatus, IActiveChatSession, IChatSessionContentRef, IChatSessionEvent, IChatSessionEventInput, IChatSessionObservedInfo, IChatSessionObservedList, IChatSessionObserverService, IChatSessionsObservedChangeEvent, IChatSessionTranscript, IChatSessionTranscriptSource } from '../../common/sessionObserver/chatSessionObserver.js';
 import { IAgentSession } from '../agentSessions/agentSessionsModel.js';
 import { IAgentSessionsService } from '../agentSessions/agentSessionsService.js';
 import { IChatWidget, IChatWidgetService, isIChatResourceViewContext, isIChatViewViewContext } from '../chat.js';
@@ -32,9 +32,9 @@ const DAY = 86_400_000;
 /** A log nobody observes is kept warm briefly, so quick re-observations don't reload it. */
 const LINGER_MS = 30_000;
 
-const NO_FIDELITY = { reasoning: 'none', toolOutput: 'truncated', diffs: 'none', timestamps: 'perTurn', modelCalls: false, liveWithoutWidget: false, liveLatencyMs: 0 } as const;
+export const NO_FIDELITY = { reasoning: 'none', toolOutput: 'truncated', diffs: 'none', timestamps: 'perTurn', modelCalls: false, liveWithoutWidget: false, liveLatencyMs: 0 } as const;
 
-function providerOf(resource: URI, providerType: string): { provider: string; harness?: string } {
+export function providerOf(resource: URI, providerType: string): { provider: string; harness?: string } {
 	if (resource.scheme === COPILOT_CLI_EH_SCHEME) {
 		return { provider: 'copilotCli' };
 	}
@@ -198,8 +198,31 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 
 	private listenedToSessions = false;
 
+	private readonly lists = new Set<IChatSessionObservedList>();
+
+	registerSessionList(list: IChatSessionObservedList): IDisposable {
+		this.lists.add(list);
+		const listener = list.onDidChange(() => this.listenedToSessions && this.diffSessions());
+		if (this.listenedToSessions) {
+			this.diffSessions();
+		}
+		return toDisposable(() => {
+			listener.dispose();
+			this.lists.delete(list);
+			if (this.listenedToSessions) {
+				this.diffSessions();
+			}
+		});
+	}
+
 	private snapshot(): ResourceMap<IChatSessionObservedInfo> {
 		const map = new ResourceMap<IChatSessionObservedInfo>();
+		for (const list of this.lists) {
+			for (const info of list.getSessions()) {
+				map.set(info.resource, info);
+			}
+		}
+		// The agent sessions model knows more about a session (its workspace, changes, timing), so it wins.
 		for (const s of this.agentSessionsService.model.sessions) {
 			map.set(s.resource, infoOf(s));
 		}
