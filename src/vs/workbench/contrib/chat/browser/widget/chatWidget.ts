@@ -82,7 +82,7 @@ import { IChatTodoListService } from '../../common/tools/chatTodoListService.js'
 import { recoverAttachmentMentions } from '../../common/attachments/chatInlineAttachments.js';
 import { ChatRequestVariableSet, ChatSessionReferenceVariableId, IChatRequestTranscriptContextVariableEntry, IChatRequestVariableEntry, isPastedTextArtifact, isPromptFileVariableEntry, isPromptTextVariableEntry, isWorkspaceVariableEntry, PromptFileVariableKind, toPromptFileVariableEntry } from '../../common/attachments/chatVariableEntries.js';
 import { ChatViewModel, IChatResponseViewModel, IChatViewModelChangeEvent, isRequestVM, isResponseVM } from '../../common/model/chatViewModel.js';
-import { IChatDraftRequestService } from '../../common/sessionObserver/chatSessionObserver.js';
+import { ActiveChatSessionHost, IChatDraftRequestService } from '../../common/sessionObserver/chatSessionObserver.js';
 import { ChatMessageRole, IChatMessage } from '../../common/languageModels.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, ChatPermissionLevel, CONTINUE_CHAT_IN_COPILOT_ACTION_ID, getAgentHostSessionResource, IResolvedNewChatSessionType, isLocalChatSessionSubjectToManagedPolicy, managedPolicyRequiresAgentHostMessage, ThinkingDisplayMode } from '../../common/constants.js';
 import { IManagedSettingsService, requiresCopilotAgentHost } from '../../../../../platform/policy/common/copilotManagedSettings.js';
@@ -488,6 +488,10 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	private readonly _visible = observableValue(this, false);
 	get visible() { return this._visible.get(); }
 
+	private get draftHost(): ActiveChatSessionHost {
+		return this.viewOptions.isSessionsWindow ? 'agentsWindow' : isIChatViewViewContext(this.viewContext) ? 'chatView' : isIChatResourceViewContext(this.viewContext) && this.viewContext.isQuickChat ? 'quickChat' : 'chatEditor';
+	}
+
 	/** Suggested drafts for this session (proposed API `chatDraftRequests`): shown in the pending list, reported as shown while visible. */
 	private bindDraftRequests(viewModel: ChatViewModel, session: URI): void {
 		let drafts: IChatDraftRequestService | undefined;
@@ -497,7 +501,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			return;
 		}
 		viewModel.setDraftSource(drafts);
-		const host = this.viewOptions.isSessionsWindow ? 'agentsWindow' : isIChatViewViewContext(this.viewContext) ? 'chatView' : isIChatResourceViewContext(this.viewContext) && this.viewContext.isQuickChat ? 'quickChat' : 'chatEditor';
+		const host = this.draftHost;
 		const report = () => {
 			// A session with no turn yet (a new-session composer) shows no transcript, so no drafts.
 			if (this._visible.get() && viewModel.model.hasRequests) {
@@ -2567,6 +2571,17 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		this.clickedRequest(item);
 	}
 
+	private takeDraftIntoInput(id: string): void {
+		const drafts = this.instantiationService.invokeFunction(accessor => accessor.get(IChatDraftRequestService));
+		const draft = drafts.getDraft(id);
+		if (!draft) {
+			return;
+		}
+		this.setInput(draft.text);
+		this.focusInput();
+		drafts.reportDraftState(draft.id, 'editing', this.draftHost);
+	}
+
 	startEditing(requestId: string): void {
 		if (this._readOnly || this.isTranscriptProgressActive) {
 			return;
@@ -2581,6 +2596,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	private clickedRequest(item: IChatListItemTemplate) {
 
 		const currentElement = item.currentElement;
+		// A suggested draft is no request of the model, so it is never edited in place: a click takes it
+		// into the input to edit, as its Edit button and Tab do.
+		if (isRequestVM(currentElement) && currentElement.pendingKind === ChatRequestQueueKind.Draft) {
+			this.takeDraftIntoInput(currentElement.id);
+			return;
+		}
 		if (isRequestVM(currentElement) && !currentElement.isPendingRequestHandoff && !this.viewModel?.editing) {
 
 			const requests = this.viewModel?.model.getRequests();
