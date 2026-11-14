@@ -142,6 +142,52 @@ suite('AgentHostTranscriptSource', () => {
 		assert.deepStrictEqual(only(events, 'toolCall').map(e => e.message), ['Fetching [https://rudderhq.dev/](https://rudderhq.dev/)', 'Run \\[x\\]\\(y\\) \\*now\\*']);
 	});
 
+	test('a turn its host keeps open for a background shell ends for the user once the agent falls quiet after its last words', () => {
+		let clock = NOW;
+		const projector = new AgentHostTranscriptProjector({ storeContent: text => ({ id: 'c', size: text.length }), now: () => clock });
+		const message = msg('Fix the contact form');
+		const shell = tool({ toolCallId: 'c1', toolName: 'bash', displayName: 'Run command', invocationMessage: 'find / -name "*.log"', toolInput: '{"command":"find /","mode":"async"}', status: ToolCallStatus.Completed, success: true, pastTenseMessage: 'Started', content: [{ type: ToolResultContentType.Text, text: 'started in background' }] } as ToolCallState);
+		const parts = [md('m1', 'Searching the logs.'), shell, md('m2', 'The form is fixed. The log search keeps running in the background.')];
+		const background = [{ kind: 'shell', id: 'shell:1', label: 'Search logs', startedAt: iso(1), command: 'find /' }] as IAgentHostChatSnapshot['backgroundWork'];
+		const open = (p: ResponsePart[], work = background): IAgentHostChatSnapshot => ({ ...snapshot([], active('a1', 0, message, p)), backgroundWork: work });
+
+		assert.deepStrictEqual(only(projector.project(open(parts)), 'turnEnded'), []);
+		assert.strictEqual(projector.status, 'working');
+		assert.strictEqual(projector.quietCheckInMs, 3_000);
+
+		clock += 3_000;
+		const ended = projector.project(open(parts));
+		assert.deepStrictEqual(ended.map(e => [e.kind, e.id]), [['agentText', 'md:a1:m2'], ['turnEnded', 'end:a1:quiet1']]);
+		assert.deepStrictEqual(only(ended, 'agentText').map(e => e.final), [true]);
+		assert.strictEqual(only(ended, 'turnEnded')[0].outcome, 'needsInput');
+		assert.strictEqual(projector.status, 'waiting');
+		assert.deepStrictEqual(projector.project(open(parts)), []);
+
+		// The agent works again in the same turn: it reopens, and its new work follows.
+		const more = [...parts, tool({ toolCallId: 'c2', toolName: 'read_bash', displayName: 'Read shell', invocationMessage: 'read', toolInput: '{}', status: ToolCallStatus.Running } as ToolCallState)];
+		assert.deepStrictEqual(projector.project(open(more)).map(e => [e.kind, e.id]), [['turnStarted', 'start:a1:quiet1'], ['toolCall', 'call:c2']]);
+		assert.strictEqual(projector.status, 'working');
+
+		// Quiet again, then the host closes the turn with nothing new: no second end.
+		const done = [...parts, { ...more[3], toolCall: { ...(more[3] as { toolCall: ToolCallState }).toolCall, status: ToolCallStatus.Completed, success: true, pastTenseMessage: 'Read', content: [] } } as ResponsePart, md('m3', 'The search found 3 logs.')];
+		projector.project(open(done));
+		clock += 3_000;
+		assert.deepStrictEqual(only(projector.project(open(done)), 'turnEnded').map(e => e.id), ['end:a1:quiet2']);
+		assert.deepStrictEqual(only(projector.project(snapshot([turn('a1', 0, message, done)])), 'turnEnded'), []);
+		assert.strictEqual(projector.status, 'waiting');
+	});
+
+	test('without listed background work, a quiet turn waits longer before it counts as handed back', () => {
+		let clock = NOW;
+		const projector = new AgentHostTranscriptProjector({ storeContent: text => ({ id: 'c', size: text.length }), now: () => clock });
+		const state = snapshot([], active('a1', 0, msg('Ship it'), [md('m1', 'Done. Anything else?')]));
+		projector.project(state);
+		clock += 3_000;
+		assert.deepStrictEqual(only(projector.project(state), 'turnEnded'), []);
+		clock += 12_000;
+		assert.deepStrictEqual(only(projector.project(state), 'turnEnded').map(e => e.id), ['end:a1:quiet1']);
+	});
+
 	test('live: streaming text waits until it closes, a pending confirmation is a question, then its decision and result follow', () => {
 		const { projector } = createProjector();
 		const message = msg('Run the tests');

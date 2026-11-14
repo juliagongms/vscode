@@ -48,6 +48,13 @@ const MAX_DIFF_CHARS = 2_000_000;
 const MAX_PENDING_CONTENT = 256;
 const DIFF_CONTEXT_LINES = 3;
 const LIVE_DEBOUNCE_MS = 200;
+/**
+ * How long an active turn's agent stays quiet after its last words, with nothing of its own
+ * running, before the turn counts as handed back while background work (a shell) keeps it open.
+ */
+const QUIET_HAND_BACK_MS = 3_000;
+/** The same while the host lists no background work: a turn normally completes within a second of its last words. */
+const QUIET_HAND_BACK_UNLISTED_MS = 15_000;
 const HYDRATE_TIMEOUT_MS = 20_000;
 const CONTENT_TIMEOUT_MS = 10_000;
 
@@ -77,7 +84,7 @@ export interface IAgentHostTranscriptProjectorOptions {
 }
 
 /** The parts of a chat's state the projector reads. */
-export type IAgentHostChatSnapshot = Pick<ChatState, 'turns' | 'activeTurn' | 'queuedMessages' | 'steeringMessage' | 'modifiedAt'>;
+export type IAgentHostChatSnapshot = Pick<ChatState, 'turns' | 'activeTurn' | 'queuedMessages' | 'steeringMessage' | 'modifiedAt' | 'backgroundWork'>;
 
 const PENDING = new class ContentPending extends Error { }();
 
@@ -206,6 +213,12 @@ function afterConfirmation(tc: ToolCallState) {
 	}
 }
 
+/** What changes when the agent does more: the parts, the last one's text, and each tool call's status. */
+function partsShape(parts: readonly ResponsePart[]): string {
+	const last = parts.at(-1);
+	return `${parts.length}:${last?.kind === ResponsePartKind.Markdown ? last.content.length : last?.kind ?? ''}:${parts.map(p => p.kind === ResponsePartKind.ToolCall ? p.toolCall.status : '').join('')}`;
+}
+
 function turnEnd(turn: Turn | undefined): number | undefined {
 	const start = parseTime(turn?.startedAt);
 	return start !== undefined && turn?.duration !== undefined ? start + turn.duration : undefined;
@@ -302,6 +315,11 @@ export class AgentHostTranscriptProjector {
 	private pendingCount = 0;
 	private readonly pendingSince = new Map<string, number>();
 	private state: IAgentHostChatSnapshot | undefined;
+	/** The active turn's agent fell quiet after its last words: since when, and how its parts looked. */
+	private quiet: { turnId: string; shape: string; since: number; wait: number } | undefined;
+	/** The active turn handed back while its host kept it open: how its parts looked then. */
+	private quietEnd: { turnId: string; shape: string; n: number } | undefined;
+	private readonly quietEnds = new Map<string, number>();
 	private readonly now: () => number;
 	private readonly mapUri: (uri: string) => URI;
 
@@ -323,7 +341,7 @@ export class AgentHostTranscriptProjector {
 	get status(): ChatSessionObservedStatus {
 		const state = this.state;
 		if (state?.activeTurn) {
-			return awaitsUser(state.activeTurn.responseParts) ? 'question' : 'working';
+			return awaitsUser(state.activeTurn.responseParts) ? 'question' : this.quietEnd?.turnId === state.activeTurn.id ? 'waiting' : 'working';
 		}
 		switch (state?.turns.at(-1)?.state) {
 			case TurnState.Cancelled: return 'cancelled';
@@ -349,6 +367,11 @@ export class AgentHostTranscriptProjector {
 			...(model ? { model } : {}),
 			...(typeof effort === 'string' ? { reasoningEffort: effort } : {}),
 		};
+	}
+
+	/** When to project again to see whether the quiet active turn has handed back. */
+	get quietCheckInMs(): number | undefined {
+		return this.quiet ? Math.max(0, this.quiet.since + this.quiet.wait - this.now()) : undefined;
 	}
 
 	project(state: IAgentHostChatSnapshot): Ev[] {
@@ -397,12 +420,60 @@ export class AgentHostTranscriptProjector {
 		if (active && !this.finished.has(active.id)) {
 			if (!this.dry) {
 				this.liveTurns.add(active.id);
+				this.reopenAfterQuiet(active, out);
 			}
 			this.projectTurn(active, undefined, previousModel, out);
 		}
 		if (!this.dry) {
+			this.projectQuietHandBack(state, out);
 			this.projectPending(state, out);
 		}
+	}
+
+	/** A turn that handed back while its host kept it open, where the agent works again: it is open until its next end. */
+	private reopenAfterQuiet(active: ActiveTurn, out: Ev[]): void {
+		if (this.quietEnd?.turnId === active.id && partsShape(active.responseParts) !== this.quietEnd.shape) {
+			out.push({ id: `start:${active.id}:quiet${this.quietEnd.n}`, at: this.now(), turnId: active.id, rawType: 'turn/quietResume', kind: 'turnStarted', trigger: 'system' });
+			this.quietEnd = undefined;
+		}
+	}
+
+	/**
+	 * The agent's last words, with none of its own tools running, while its host keeps the turn open
+	 * (for a background shell, say): after a quiet spell the turn ends for the user, a hand-back.
+	 */
+	private projectQuietHandBack(state: IAgentHostChatSnapshot, out: Ev[]): void {
+		const active = state.activeTurn;
+		if (!active || this.quietEnd?.turnId === active.id) {
+			this.quiet = undefined;
+			return;
+		}
+		const parts = active.responseParts;
+		const shape = partsShape(parts);
+		const last = parts.at(-1);
+		const running = parts.some(p => p.kind === ResponsePartKind.ToolCall && p.toolCall.status !== ToolCallStatus.Completed && p.toolCall.status !== ToolCallStatus.Cancelled);
+		if (last?.kind !== ResponsePartKind.Markdown || !last.content.trim() || running || awaitsUser(parts)) {
+			this.quiet = undefined;
+			return;
+		}
+		const now = this.now();
+		const wait = state.backgroundWork?.length ? QUIET_HAND_BACK_MS : QUIET_HAND_BACK_UNLISTED_MS;
+		if (this.quiet?.turnId !== active.id || this.quiet.shape !== shape) {
+			this.quiet = { turnId: active.id, shape, since: now, wait };
+			return;
+		}
+		this.quiet.wait = wait;
+		if (now - this.quiet.since < wait) {
+			return;
+		}
+		// The last words close now, as they would at the turn's end.
+		const key = `md:${active.id}:${last.id}`;
+		this.once(key, out, () => ({ id: key, at: now, turnId: active.id, rawType: last.kind, kind: 'agentText', text: last.content, final: true }));
+		const n = (this.quietEnds.get(active.id) ?? 0) + 1;
+		this.quietEnds.set(active.id, n);
+		out.push({ id: `end:${active.id}:quiet${n}`, at: now, turnId: active.id, rawType: 'turn/quiet', kind: 'turnEnded', outcome: 'needsInput' });
+		this.quietEnd = { turnId: active.id, shape, n };
+		this.quiet = undefined;
 	}
 
 	private once(key: string, out: Ev[], build: () => Ev | readonly Ev[] | undefined): void {
@@ -546,6 +617,14 @@ export class AgentHostTranscriptProjector {
 		const endId = resumed ? `end:${turnId}:resume${resumed}` : `end:${turnId}`;
 		if (error && !parts.some(p => p.kind === ResponsePartKind.Error)) {
 			this.once(errId, out, () => ({ ...env(errId, 'turn/error'), kind: 'error', message: error.message, code: error.errorType }));
+		}
+		const quietEnd = this.quietEnd?.turnId === turnId ? this.quietEnd : undefined;
+		if (quietEnd && !this.dry) {
+			this.quietEnd = undefined;
+			// It ended for the user at its quiet hand-back; the host closing it later adds nothing.
+			if (completed.state === TurnState.Complete && partsShape(parts) === quietEnd.shape) {
+				return;
+			}
 		}
 		this.once(endId, out, () => {
 			const when = turnEnd(completed) ?? at();
@@ -860,6 +939,8 @@ class AgentHostChatObservation extends Disposable {
 	private readonly limiter = new Limiter<void>(8);
 	private readonly projector: AgentHostTranscriptProjector;
 	private readonly scheduler = this._register(new RunOnceScheduler(() => this.flushAndFetch(), LIVE_DEBOUNCE_MS));
+	/** A quiet active turn is projected again once its wait is over, though nothing changed. */
+	private readonly quietCheck = this._register(new RunOnceScheduler(() => this.flushAndFetch(), QUIET_HAND_BACK_MS));
 	private disposed = false;
 
 	constructor(
@@ -927,6 +1008,12 @@ class AgentHostChatObservation extends Disposable {
 			this.cache.clear();
 		}
 		this.sink.patchInfo({ status: this.projector.status, ...this.projector.info, fidelity: this.fidelity });
+		const quietIn = this.projector.quietCheckInMs;
+		if (quietIn === undefined) {
+			this.quietCheck.cancel();
+		} else if (!this.quietCheck.isScheduled()) {
+			this.quietCheck.schedule(quietIn + LIVE_DEBOUNCE_MS);
+		}
 		return wanted.filter(r => !this.cache.has(agentHostContentKey(r)));
 	}
 
