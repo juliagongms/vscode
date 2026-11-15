@@ -15,11 +15,11 @@ declare module 'vscode' {
 	export enum UserActivityKind {
 		/** Keyboard focus moved to a part of the window: an editor, a view, the chat input, a terminal, a page. */
 		Focus = 1,
-		/** A click on an element of the window. */
+		/** A click on an element of the window. `target.label` is what was clicked (the item it is in speaks for it: a row, a button); `context` the text of what frames it (a confirmation, a dialog, a row, a chat turn), when that says more. */
 		Click = 2,
 		/** Text selected in an editor, the chat input or a transcript. `text` is the selection, `context` the lines around it. */
 		Selection = 3,
-		/** Text typed into an editor, the chat input, a terminal or an input box, coalesced until a pause. `text` is what was typed, `context` the line or field as it now reads. */
+		/** Text typed into an editor, the chat input, a terminal or an input box, coalesced until a pause. `text` is what was typed, `context` the line or field as it now reads. In a document, when the edit stayed within the lines around where it began, `context` is those lines after it, `detail.before` the same lines before it and `detail.startLine` their first line; a deletion alone is recorded too. */
 		Type = 4,
 		/** Text copied. `text` is what was copied, `target` where from. */
 		Copy = 5,
@@ -40,7 +40,9 @@ declare module 'vscode' {
 		/** The window gained or lost focus. `detail.focused`. */
 		WindowFocus = 13,
 		/** A search ran, in the search view or a find widget. `text` is the query. */
-		Search = 14
+		Search = 14,
+		/** Part of a document stayed in view in a focused editor for 15 seconds or more. `target.line` is its first line, `detail.endLine` its last and `detail.seconds` how long; `context` the text in view, head and tail. */
+		Read = 15
 	}
 
 	/**
@@ -81,7 +83,7 @@ declare module 'vscode' {
 		readonly text?: string;
 		/** Text around it, to read it in place: lines around a selection or an edit, a chat session's latest exchange, a page's visible text, a command's output. At most 4000 characters. */
 		readonly context?: string;
-		/** Kind-specific facts: `exitCode`, `focused`, `source` (`keybinding`, `menu`, `palette`), `window` (`editor`, `agents`). */
+		/** Kind-specific facts: `exitCode`, `focused`, `source` (`keybinding`, `menu`, `palette`), `window` (`editor`, `agents`), `before` and `startLine` (an edit), `seconds` and `endLine` (reading). */
 		readonly detail?: { readonly [key: string]: string | number | boolean };
 	}
 

@@ -12,7 +12,7 @@ import { BrandedService, createDecorator } from '../../../../platform/instantiat
  * The kinds of {@link IUserActivityEvent}, in the order of the members of the proposed API's
  * `UserActivityKind` enum: the API's value of a kind is its 1-based position here.
  */
-export const USER_ACTIVITY_KINDS = ['focus', 'click', 'selection', 'type', 'copy', 'cut', 'paste', 'command', 'openEditor', 'sessionSwitch', 'browser', 'terminal', 'windowFocus', 'search'] as const;
+export const USER_ACTIVITY_KINDS = ['focus', 'click', 'selection', 'type', 'copy', 'cut', 'paste', 'command', 'openEditor', 'sessionSwitch', 'browser', 'terminal', 'windowFocus', 'search', 'read'] as const;
 
 export type UserActivityKind = typeof USER_ACTIVITY_KINDS[number];
 

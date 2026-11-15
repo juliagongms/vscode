@@ -4601,6 +4601,7 @@ export enum UserActivityKind {
 	Terminal = 12,
 	WindowFocus = 13,
 	Search = 14,
+	Read = 15,
 }
 
 //#endregion

@@ -7,7 +7,7 @@ import assert from 'assert';
 import * as sinon from 'sinon';
 import { mainWindow } from '../../../../../base/browser/window.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { capText, headAndTail, IdleCoalescer, isNoisyCommand, isPasswordField, isPlainTextField, isSearchField, linesAround, resolveDomTarget, textAround, TypingBuffer } from '../../browser/userActivityCaptureHelpers.js';
+import { capText, headAndTail, IdleCoalescer, isNoisyCommand, isPasswordField, isPlainTextField, isSearchField, linesAround, resolveDomTarget, resolveFrame, textAround, TypingBuffer, visibleText } from '../../browser/userActivityCaptureHelpers.js';
 
 suite('userActivity capture helpers', () => {
 
@@ -85,7 +85,7 @@ suite('userActivity capture helpers', () => {
 		for (const id of ['type', 'deleteLeft', 'cursorDown', 'scrollLineUp', '_internal.thing', 'editor.action.triggerSuggest', 'editor.action.showHover', 'setContext', 'vscode.executeDocumentSymbolProvider', 'list.focusDown']) {
 			assert.strictEqual(isNoisyCommand(id), true, id);
 		}
-		for (const id of ['workbench.action.files.save', 'git.commit', 'workbench.action.chat.open', 'editor.action.formatDocument', 'workbench.action.showCommands']) {
+		for (const id of ['workbench.action.files.save', 'git.commit', 'workbench.action.chat.open', 'editor.action.formatDocument', 'workbench.action.showCommands', 'editor.action.inlineSuggest.commit']) {
 			assert.strictEqual(isNoisyCommand(id), false, id);
 		}
 	});
@@ -119,6 +119,31 @@ suite('userActivity capture helpers', () => {
 
 		// A view the workbench reports wins over the container's id.
 		assert.deepStrictEqual(resolveDomTarget(root.querySelector('.name')!, () => 'workbench.explorer.fileView').view, 'workbench.explorer.fileView');
+	});
+
+	test('a click says which item it picked and what frames it', () => {
+		const root = html(`
+			<div class="part sessions" id="workbench.parts.sessions">
+				<div class="sessions-list-control">
+					<div role="listitem"><span class="title">Ambient system names</span><span aria-hidden="true">Ambient system names</span><span class="age">10 hrs ago</span><span class="diff">+754 -0</span></div>
+				</div>
+			</div>
+			<div class="part editor" id="workbench.parts.editor">
+				<div class="interactive-session">
+					<div class="chat-confirmation-widget"><div class="title">Run command?</div><code>npm run eval:core -- run --id hc13</code><div class="buttons"><a role="button" class="allow">Allow</a><a role="button">Skip</a></div></div>
+				</div>
+			</div>`);
+
+		// Text runs keep their breaks, a run repeated for screen readers reads once.
+		assert.strictEqual(visibleText(root.querySelector('[role="listitem"]')!), 'Ambient system names 10 hrs ago +754 -0');
+		// A click on a row's age names the row.
+		assert.deepStrictEqual(resolveDomTarget(root.querySelector('.age')!), { area: 'sessions', label: 'Ambient system names 10 hrs ago +754 -0', role: 'listitem' });
+		// An "Allow" says what it allowed.
+		const allow = root.querySelector('.allow')!;
+		assert.deepStrictEqual(resolveDomTarget(allow), { area: 'chat', label: 'Allow', role: 'button' });
+		assert.strictEqual(resolveFrame(allow, 'Allow'), 'Run command? npm run eval:core -- run --id hc13 Allow Skip');
+		// A frame that says no more than the label adds nothing.
+		assert.strictEqual(resolveFrame(root.querySelector('.age')!, 'Ambient system names 10 hrs ago +754 -0'), undefined);
 	});
 
 	test('records plain fields, never passwords or the hidden inputs of editors and terminals', () => {

@@ -27,7 +27,7 @@ import { IEditorService } from '../../editor/common/editorService.js';
 import { IWorkbenchEnvironmentService } from '../../environment/common/environmentService.js';
 import { IHostService } from '../../host/browser/host.js';
 import { getUserActivitySources, IUserActivityCaptureService, IUserActivityEvent, IUserActivitySource, IUserActivityTarget, USER_ACTIVITY_MAX_CONTEXT, USER_ACTIVITY_MAX_TEXT } from '../common/userActivityCapture.js';
-import { capText, IdleCoalescer, isNoisyCommand, isPasswordField, isPlainTextField, isSearchField, linesAround, normalizeWhitespace, resolveArea, resolveDomTarget, resolveLabel, textAround, TypingBuffer } from './userActivityCaptureHelpers.js';
+import { capText, headAndTail, IdleCoalescer, isNoisyCommand, isPasswordField, isPlainTextField, isSearchField, linesAround, normalizeWhitespace, resolveArea, resolveDomTarget, resolveFrame, resolveLabel, textAround, TypingBuffer } from './userActivityCaptureHelpers.js';
 
 /** Keyboard focus settles this long before it is recorded. */
 const FOCUS_DEBOUNCE = 300;
@@ -41,6 +41,14 @@ const SELECTION_DEBOUNCE = 700;
 const GESTURE_WINDOW = 800;
 /** Lines around an edit, and around a selection, that read it in place. */
 const TYPING_CONTEXT_LINES = 2;
+/** Lines kept around the cursor, as they read before an edit, so the edit can say what it changed. */
+const EDIT_CONTEXT_LINES = 1;
+const MAX_EDIT_LINES = 40;
+const MAX_EDIT_BEFORE = 1500;
+/** Reading: lines kept in view in a focused editor this long or longer are recorded, once scrolling settles this long. */
+const READ_MIN = 15_000;
+const READ_SETTLE = 1000;
+const READ_CONTEXT = 800;
 const SELECTION_CONTEXT_LINES = 5;
 /** The most lines of a selection that are read. */
 const MAX_SELECTION_LINES = 200;
@@ -58,6 +66,20 @@ interface IEditorTyping {
 	uri?: URI;
 	line?: number;
 	context?: string;
+	/** The lines the edit touched as they read before it, while the edit stays within them. */
+	before?: IEditorLines;
+	/** Lines the edit added (or, below zero, removed) so far. */
+	lineDelta: number;
+	/** The edit left the lines known before it, or the document changed under them. */
+	beforeLost?: boolean;
+}
+
+/** Lines of a document as they read at a version. */
+interface IEditorLines {
+	readonly uri: string;
+	readonly version: number;
+	readonly start: number;
+	readonly lines: readonly string[];
 }
 
 interface IFieldTyping {
@@ -91,6 +113,10 @@ export class UserActivityCaptureService extends Disposable implements IUserActiv
 	private lastGesture: IGesture | undefined;
 	/** Record typing still pending, so that it comes before what ends it. */
 	private readonly typingFlushes = new Set<() => void>();
+	/** Edits in code editors still coalescing, while capture runs. */
+	private editorTyping: IdleCoalescer<ICodeEditor, IEditorTyping> | undefined;
+	/** What the user reads in code editors, while capture runs. */
+	private reading: ReadingTracker | undefined;
 	private readonly windowKind: 'agents' | 'editor';
 
 	constructor(
@@ -161,6 +187,7 @@ export class UserActivityCaptureService extends Disposable implements IUserActiv
 		const store = new DisposableStore();
 		const attach = (what: string, fn: (store: DisposableStore) => void) => this.guard(`could not capture ${what}`, fn)(store);
 		attach('the DOM', s => this.captureDom(s));
+		attach('reading', s => this.captureReading(s));
 		attach('code editors', s => this.captureEditors(s));
 		attach('the active editor', s => this.captureActiveEditor(s));
 		attach('commands', s => this.captureCommands(s));
@@ -234,7 +261,10 @@ export class UserActivityCaptureService extends Disposable implements IUserActiv
 		on('click', e => {
 			const element = elementOf(e.target);
 			if (element && e.isTrusted) {
-				this.record({ kind: 'click', time: Date.now(), target: this.clickTarget(element) });
+				const target = this.clickTarget(element);
+				// What the click acted on: the command an "Allow" approved, the session a row stands for.
+				const context = element.closest('.monaco-editor') ? undefined : resolveFrame(element, target.label);
+				this.record({ kind: 'click', time: Date.now(), target, ...(context ? { context } : {}) });
 			}
 		});
 
@@ -444,32 +474,45 @@ export class UserActivityCaptureService extends Disposable implements IUserActiv
 	}
 
 	private captureEditors(store: DisposableStore): void {
+		const snapshots = new Map<ICodeEditor, IEditorLines>();
 		const typing = store.add(new IdleCoalescer<ICodeEditor, IEditorTyping>(
 			EDITOR_TYPING_IDLE,
-			() => ({ buffer: new TypingBuffer() }),
+			() => ({ buffer: new TypingBuffer(), lineDelta: 0 }),
 			this.guard('typing in an editor', (editor, state) => {
-				if (state.buffer.text) {
-					this.record({ kind: 'type', time: Date.now(), target: this.editorTarget(editor, state.line, state.uri), text: state.buffer.text, context: state.context });
+				const change = this.editorChange(editor, state);
+				if (state.buffer.text || change) {
+					this.record({ kind: 'type', time: Date.now(), target: this.editorTarget(editor, state.line, state.uri), text: state.buffer.text, context: change?.after ?? state.context, ...(change ? { detail: { before: change.before, startLine: change.start } } : {}) });
 				}
+				this.snapshot(editor, snapshots);
 			}),
 		));
+		store.add(toDisposable(() => snapshots.clear()));
 		this.flushTypingWith(store, () => typing.flushAll());
+		this.editorTyping = typing;
+		store.add(toDisposable(() => this.editorTyping = undefined));
 		const editors = store.add(new DisposableMap<ICodeEditor>());
 		const add = (editor: ICodeEditor) => {
 			if (!editors.has(editor)) {
-				editors.set(editor, this.captureEditor(editor, typing));
+				editors.set(editor, this.captureEditor(editor, typing, snapshots));
 			}
 		};
 		this.codeEditorService.listCodeEditors().forEach(add);
 		store.add(this.codeEditorService.onCodeEditorAdd(this.guard('add an editor', add)));
 		store.add(this.codeEditorService.onCodeEditorRemove(this.guard('remove an editor', editor => {
 			typing.flush(editor);
+			snapshots.delete(editor);
 			editors.deleteAndDispose(editor);
 		})));
 	}
 
-	private captureEditor(editor: ICodeEditor, typing: IdleCoalescer<ICodeEditor, IEditorTyping>): IDisposable {
+	private captureEditor(editor: ICodeEditor, typing: IdleCoalescer<ICodeEditor, IEditorTyping>, snapshots: Map<ICodeEditor, IEditorLines>): IDisposable {
 		const store = new DisposableStore();
+		this.snapshot(editor, snapshots);
+		store.add(editor.onDidFocusEditorText(() => this.snapshot(editor, snapshots)));
+		store.add(editor.onDidChangeModel(() => this.snapshot(editor, snapshots)));
+		if (this.reading) {
+			store.add(this.reading.watch(editor));
+		}
 
 		store.add(editor.onDidChangeModelContent(this.guard('editor content', (e: IModelContentChangedEvent) => {
 			const model = editor.getModel();
@@ -490,6 +533,19 @@ export class UserActivityCaptureService extends Disposable implements IUserActiv
 				if (state.uri && state.uri.toString() !== model.uri.toString()) {
 					return;
 				}
+				// The lines as they read before the edit, if the last snapshot is of the version just before it.
+				const snap = snapshots.get(editor);
+				const within = (start: number, count: number) => e.changes.every(c => c.range.startLineNumber >= start && c.range.endLineNumber < start + count);
+				if (!state.before && !state.beforeLost) {
+					if (snap && snap.uri === model.uri.toString() && snap.version === e.versionId - 1 && within(snap.start, snap.lines.length)) {
+						state.before = snap;
+					} else {
+						state.beforeLost = true;
+					}
+				} else if (state.before && !within(state.before.start, state.before.lines.length + state.lineDelta)) {
+					state.beforeLost = true;
+				}
+				state.lineDelta += e.changes.reduce((n, c) => n + c.text.split('\n').length - 1 - (c.range.endLineNumber - c.range.startLineNumber), 0);
 				state.buffer.apply(inserted, deleted);
 				state.uri = model.uri;
 				state.line = line;
@@ -524,6 +580,7 @@ export class UserActivityCaptureService extends Disposable implements IUserActiv
 			});
 		}), SELECTION_DEBOUNCE));
 		store.add(editor.onDidChangeCursorSelection(e => {
+			this.snapshot(editor, snapshots);
 			if (e.selection.isEmpty() && e.secondarySelections.every(s => s.isEmpty())) {
 				selection.cancel();
 				lastSelection = undefined;
@@ -533,6 +590,58 @@ export class UserActivityCaptureService extends Disposable implements IUserActiv
 		}));
 
 		return store;
+	}
+
+	/** Keeps the lines around the cursor as they read now, unless an edit there is still coalescing. */
+	private snapshot(editor: ICodeEditor, snapshots: Map<ICodeEditor, IEditorLines>): void {
+		const model = editor.getModel();
+		const selection = editor.getSelection();
+		if (!model || !selection || model.uri.scheme === Schemas.vscodeChatInput || this.editorTyping?.has(editor)) {
+			return;
+		}
+		const start = Math.max(1, selection.startLineNumber - EDIT_CONTEXT_LINES);
+		const end = Math.min(model.getLineCount(), selection.endLineNumber + EDIT_CONTEXT_LINES, start + MAX_EDIT_LINES - 1);
+		const lines: string[] = [];
+		for (let line = start; line <= end; line++) {
+			lines.push(model.getLineContent(line));
+		}
+		snapshots.set(editor, { uri: model.uri.toString(), version: model.getVersionId(), start, lines });
+	}
+
+	/** What a finished edit changed: its lines before and after, when the edit stayed within lines known before it. */
+	private editorChange(editor: ICodeEditor, state: IEditorTyping): { start: number; before: string; after: string } | undefined {
+		const model = editor.getModel();
+		const before = state.before;
+		if (!model || !before || state.beforeLost || before.uri !== model.uri.toString()) {
+			return undefined;
+		}
+		const end = Math.min(model.getLineCount(), before.start + before.lines.length - 1 + state.lineDelta);
+		const after: string[] = [];
+		for (let line = before.start; line <= end; line++) {
+			after.push(model.getLineContent(line));
+		}
+		const was = before.lines.join('\n');
+		const now = after.join('\n');
+		return was === now ? undefined : { start: before.start, before: capText(was, MAX_EDIT_BEFORE), after: capText(now, USER_ACTIVITY_MAX_CONTEXT) };
+	}
+
+	// ---- reading ----
+
+	private captureReading(store: DisposableStore): void {
+		this.reading = store.add(new ReadingTracker(
+			() => this.hostService.hasFocus,
+			() => this.codeEditorService.getFocusedCodeEditor() ?? undefined,
+			this.guard('reading', (editor: ICodeEditor, uri: URI, start: number, end: number, seconds: number) => {
+				const model = editor.getModel();
+				if (!model || model.uri.toString() !== uri.toString()) {
+					return;
+				}
+				const last = Math.min(end, model.getLineCount());
+				const text = model.getValueInRange(new Range(start, 1, last, model.getLineMaxColumn(last)));
+				this.record({ kind: 'read', time: Date.now(), target: this.editorTarget(editor, start, uri), context: headAndTail(text, READ_CONTEXT), detail: { seconds, endLine: last } });
+			}),
+		));
+		store.add(toDisposable(() => this.reading = undefined));
 	}
 
 	// ---- the active editor ----
@@ -589,8 +698,84 @@ export class UserActivityCaptureService extends Disposable implements IUserActiv
 
 	private captureWindowFocus(store: DisposableStore): void {
 		store.add(this.hostService.onDidChangeFocus(this.guard('window focus', (focused: boolean) => {
+			this.reading?.windowFocus(focused);
 			this.record({ kind: 'windowFocus', time: Date.now(), target: { area: 'other' }, detail: { focused } });
 		})));
+	}
+}
+
+/**
+ * Spans of a document the user kept in view in a focused editor, recorded once each ends (a scroll,
+ * a blur, the window losing focus) if it lasted {@link READ_MIN} or longer. A span starts once
+ * scrolling settles for {@link READ_SETTLE}.
+ */
+class ReadingTracker extends Disposable {
+	private span: { editor: ICodeEditor; uri: URI; start: number; end: number; since: number } | undefined;
+	private readonly reopen: RunOnceScheduler;
+
+	constructor(
+		private readonly windowHasFocus: () => boolean,
+		private readonly focusedEditor: () => ICodeEditor | undefined,
+		private readonly onRead: (editor: ICodeEditor, uri: URI, start: number, end: number, seconds: number) => void,
+	) {
+		super();
+		this.reopen = this._register(new RunOnceScheduler(() => this.open(), READ_SETTLE));
+		this._register(toDisposable(() => this.span = undefined));
+	}
+
+	watch(editor: ICodeEditor): IDisposable {
+		const store = new DisposableStore();
+		store.add(editor.onDidFocusEditorWidget(() => this.settle()));
+		// Focus may be moving to another editor: look again once it settles.
+		store.add(editor.onDidBlurEditorWidget(() => this.settle()));
+		store.add(editor.onDidScrollChange(e => {
+			if (e.scrollTopChanged) {
+				this.settle();
+			}
+		}));
+		store.add(editor.onDidChangeModel(() => this.settle()));
+		store.add(toDisposable(() => {
+			if (this.span?.editor === editor) {
+				this.span = undefined;
+			}
+		}));
+		return store;
+	}
+
+	windowFocus(focused: boolean): void {
+		if (focused) {
+			this.settle();
+		} else {
+			this.reopen.cancel();
+			this.close();
+		}
+	}
+
+	private settle(): void {
+		this.close();
+		this.reopen.schedule();
+	}
+
+	private open(): void {
+		this.close();
+		const editor = this.focusedEditor();
+		const model = editor?.getModel();
+		if (!editor || !model || !this.windowHasFocus() || !editor.hasWidgetFocus() || model.uri.scheme === Schemas.vscodeChatInput) {
+			return;
+		}
+		const [range] = editor.getVisibleRanges();
+		if (range) {
+			this.span = { editor, uri: model.uri, start: range.startLineNumber, end: range.endLineNumber, since: Date.now() };
+		}
+	}
+
+	private close(): void {
+		const span = this.span;
+		this.span = undefined;
+		const ms = span ? Date.now() - span.since : 0;
+		if (span && ms >= READ_MIN) {
+			this.onRead(span.editor, span.uri, span.start, span.end, Math.round(ms / 1000));
+		}
 	}
 }
 

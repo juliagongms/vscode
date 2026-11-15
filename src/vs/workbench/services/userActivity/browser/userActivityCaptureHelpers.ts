@@ -164,8 +164,14 @@ const NOISY_COMMANDS = new Set([
 
 const NOISY_PREFIXES = ['_', 'cursor', 'scroll', 'vscode.', 'editor.action.trigger', 'editor.action.inlineSuggest.', 'editor.action.wordHighlight', 'list.scroll', 'list.focus', 'quickInput.'];
 
+/** Commands under a noisy prefix that say what the user chose: taking an inline suggestion, whole or in part. */
+const KEPT_COMMANDS = new Set(['editor.action.inlineSuggest.commit', 'editor.action.inlineSuggest.acceptNextWord', 'editor.action.inlineSuggest.acceptNextLine']);
+
 /** Whether a command runs too often, or too far inside the workbench, to be worth recording. */
 export function isNoisyCommand(id: string): boolean {
+	if (KEPT_COMMANDS.has(id)) {
+		return false;
+	}
 	if (!id || NOISY_COMMANDS.has(id) || NOISY_PREFIXES.some(p => id.startsWith(p))) {
 		return true;
 	}
@@ -296,12 +302,77 @@ export function resolveRole(element: Element): string | undefined {
 	return undefined;
 }
 
+/** How much text {@link visibleText} reads before it stops. */
+const MAX_VISIBLE_TEXT = 4000;
+
+/**
+ * An element's text as it reads: its text runs joined by spaces, so a list row's title and its
+ * time don't run together, each run once in a row (a title repeated for screen readers), without
+ * what is hidden from them or the values of inputs.
+ */
+export function visibleText(element: Element): string {
+	const parts: string[] = [];
+	let length = 0;
+	const walk = (node: Node): void => {
+		for (const child of node.childNodes) {
+			if (length > MAX_VISIBLE_TEXT) {
+				return;
+			}
+			if (child.nodeType === 3) {
+				const text = normalizeWhitespace(child.textContent ?? '');
+				if (text && text !== parts[parts.length - 1]) {
+					parts.push(text);
+					length += text.length + 1;
+				}
+			} else if (child.nodeType === 1) {
+				const el = child as Element;
+				if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE' && el.getAttribute('aria-hidden') !== 'true' && !el.hasAttribute('hidden')) {
+					walk(el);
+				}
+			}
+		}
+	};
+	walk(element);
+	return parts.join(' ');
+}
+
+/** Roles of what a click picks: a row, an item, a button, a link, a tab. */
+const ITEM_ROLES = new Set(['listitem', 'treeitem', 'option', 'row', 'gridcell', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'button', 'link', 'checkbox', 'radio', 'switch']);
+
+/** The nearest element at or above `element` that a click picks (by its role), within the part. */
+function itemOf(element: Element): Element | undefined {
+	let current: Element | null = element;
+	for (let depth = 0; current && depth < MAX_DEPTH && !isBoundary(current); depth++, current = current.parentElement) {
+		const role = current.getAttribute('role') || implicitRole(current);
+		if (role && ITEM_ROLES.has(role)) {
+			return current;
+		}
+	}
+	return undefined;
+}
+
+const explicitName = (element: Element) => normalizeWhitespace(element.getAttribute('aria-label') || labelledBy(element) || element.getAttribute('title') || '');
+
 /**
  * What an element says, from it or its nearest ancestor that has an accessible name: its
- * `aria-label`, `aria-labelledby`, `title`, or its visible text when that is short. Long text
- * is shortened. Input values are never read.
+ * `aria-label`, `aria-labelledby`, `title`, or its visible text when that is short. Inside an item
+ * a click picks (a list row, a button), the item speaks for it: a click on a session's age says
+ * which session. Long text is shortened. Input values are never read.
  */
 export function resolveLabel(element: Element): string | undefined {
+	const item = itemOf(element);
+	if (item) {
+		for (let current: Element | null = element; current; current = current === item ? null : current.parentElement) {
+			const named = explicitName(current);
+			if (named) {
+				return capText(named, MAX_LABEL);
+			}
+		}
+		const text = visibleText(item);
+		if (text) {
+			return capText(text, MAX_LABEL);
+		}
+	}
 	let fallback: string | undefined;
 	let textStillShort = true;
 	let current: Element | null = element;
@@ -311,7 +382,7 @@ export function resolveLabel(element: Element): string | undefined {
 			return capText(normalizeWhitespace(named), MAX_LABEL);
 		}
 		if (textStillShort && current.tagName !== 'INPUT' && current.tagName !== 'TEXTAREA') {
-			const text = normalizeWhitespace(current.textContent ?? '');
+			const text = visibleText(current);
 			if (text && text.length <= MAX_LABEL) {
 				return text;
 			}
@@ -326,6 +397,31 @@ export function resolveLabel(element: Element): string | undefined {
 		}
 	}
 	return fallback;
+}
+
+/** What frames a click, most specific first: a confirmation, a dialog, a notification, a row, a chat turn, a hover. */
+const FRAMES = [
+	'.chat-confirmation-widget, .chat-confirmation-widget2, .chat-tool-invocation-part',
+	'[role="dialog"], [role="alertdialog"], .monaco-dialog-box',
+	'.notification-list-item',
+	'[role="listitem"], [role="treeitem"], [role="option"], [role="row"]',
+	'.interactive-item-container',
+	'.monaco-hover',
+].join(', ');
+const MAX_FRAME = 600;
+
+/**
+ * The text of what frames a clicked element, so a click says what it acted on: the command an
+ * "Allow" approved, the session a row stands for, the chat turn a link sits in. None when the frame
+ * says no more than the label.
+ */
+export function resolveFrame(element: Element, label?: string): string | undefined {
+	const frame = element.closest(FRAMES);
+	if (!frame || frame.closest('.monaco-editor .view-lines')) {
+		return undefined;
+	}
+	const text = visibleText(frame);
+	return text && text !== label && text.length > (label?.length ?? 0) ? headAndTail(text, MAX_FRAME) : undefined;
 }
 
 /** Where a DOM element sits and what it says. `viewOf` tells the view it is in, when known. */
