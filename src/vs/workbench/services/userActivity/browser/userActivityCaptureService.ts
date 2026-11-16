@@ -49,6 +49,8 @@ const MAX_EDIT_BEFORE = 1500;
 const READ_MIN = 15_000;
 const READ_SETTLE = 1000;
 const READ_CONTEXT = 800;
+/** A reading span stops counting this long after the user's last keystroke, pointer move or scroll in the window. */
+const READ_IDLE = 60_000;
 const SELECTION_CONTEXT_LINES = 5;
 /** The most lines of a selection that are read. */
 const MAX_SELECTION_LINES = 200;
@@ -117,6 +119,7 @@ export class UserActivityCaptureService extends Disposable implements IUserActiv
 	private editorTyping: IdleCoalescer<ICodeEditor, IEditorTyping> | undefined;
 	/** What the user reads in code editors, while capture runs. */
 	private reading: ReadingTracker | undefined;
+	private lastInputAt = Date.now();
 	private readonly windowKind: 'agents' | 'editor';
 
 	constructor(
@@ -258,12 +261,24 @@ export class UserActivityCaptureService extends Disposable implements IUserActiv
 			}
 		});
 
+		// Signs the user is there, for reading spans: one stops counting a while after the last of them.
+		const present = () => this.lastInputAt = Date.now();
+		on('mousemove', present);
+		on('keydown', present);
+		on('wheel', present);
+
 		on('click', e => {
 			const element = elementOf(e.target);
 			if (element && e.isTrusted) {
 				const target = this.clickTarget(element);
-				// What the click acted on: the command an "Allow" approved, the session a row stands for.
-				const context = element.closest('.monaco-editor') ? undefined : resolveFrame(element, target.label);
+				// What the click acted on: the command an "Allow" approved, the session a row stands for; in a
+				// document, the line clicked with one either side, as it reads.
+				const editor = element.closest('.monaco-editor') ? this.focusedEditorFor(element) : undefined;
+				const model = editor?.getModel();
+				const line = editor?.getPosition()?.lineNumber;
+				const context = element.closest('.monaco-editor')
+					? (model && line && model.uri.scheme !== Schemas.vscodeChatInput ? linesAround(model, line, line, 1) : undefined)
+					: resolveFrame(element, target.label);
 				this.record({ kind: 'click', time: Date.now(), target, ...(context ? { context } : {}) });
 			}
 		});
@@ -630,6 +645,7 @@ export class UserActivityCaptureService extends Disposable implements IUserActiv
 	private captureReading(store: DisposableStore): void {
 		this.reading = store.add(new ReadingTracker(
 			() => this.hostService.hasFocus,
+			() => this.lastInputAt,
 			() => this.codeEditorService.getFocusedCodeEditor() ?? undefined,
 			this.guard('reading', (editor: ICodeEditor, uri: URI, start: number, end: number, seconds: number) => {
 				const model = editor.getModel();
@@ -706,7 +722,8 @@ export class UserActivityCaptureService extends Disposable implements IUserActiv
 
 /**
  * Spans of a document the user kept in view in a focused editor, recorded once each ends (a scroll,
- * a blur, the window losing focus) if it lasted {@link READ_MIN} or longer. A span starts once
+ * a blur, the window losing focus) if it lasted {@link READ_MIN} or longer, counted up to
+ * {@link READ_IDLE} past their last keystroke, pointer move or scroll. A span starts once
  * scrolling settles for {@link READ_SETTLE}.
  */
 class ReadingTracker extends Disposable {
@@ -715,6 +732,7 @@ class ReadingTracker extends Disposable {
 
 	constructor(
 		private readonly windowHasFocus: () => boolean,
+		private readonly lastInputAt: () => number,
 		private readonly focusedEditor: () => ICodeEditor | undefined,
 		private readonly onRead: (editor: ICodeEditor, uri: URI, start: number, end: number, seconds: number) => void,
 	) {
@@ -772,7 +790,8 @@ class ReadingTracker extends Disposable {
 	private close(): void {
 		const span = this.span;
 		this.span = undefined;
-		const ms = span ? Date.now() - span.since : 0;
+		// Up to a while after the user's last sign of being there, not the time the window sat unattended.
+		const ms = span ? Math.min(Date.now(), Math.max(span.since, this.lastInputAt()) + READ_IDLE) - span.since : 0;
 		if (span && ms >= READ_MIN) {
 			this.onRead(span.editor, span.uri, span.start, span.end, Math.round(ms / 1000));
 		}
