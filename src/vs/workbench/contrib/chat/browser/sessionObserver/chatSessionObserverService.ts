@@ -6,6 +6,7 @@
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ResourceMap } from '../../../../../base/common/map.js';
+import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
@@ -97,6 +98,9 @@ function infoOf(s: IAgentSession): IChatSessionObservedInfo {
 	};
 }
 
+/** How long the chat input must stay unchanged before its text is reported as the session's unsent input. */
+const INPUT_SETTLE_MS = 400;
+
 class SharedLog extends Disposable {
 	readonly events: IChatSessionEvent[] = [];
 	readonly onDidAppend = this._register(new Emitter<readonly IChatSessionEvent[]>());
@@ -160,6 +164,9 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 	private readonly _onDidChangeActiveSessions = this._register(new Emitter<readonly IActiveChatSession[]>());
 	readonly onDidChangeActiveSessions = this._onDidChangeActiveSessions.event;
 	private readonly widgetListeners = this._register(new DisposableStore());
+	/** What each observed session's input held when last reported, so an unchanged input isn't reported again. */
+	private readonly lastInput = new ResourceMap<string>();
+	private inputReports: RunOnceScheduler[] = [];
 
 	constructor(
 		@IAgentSessionsService private readonly agentSessionsService: IAgentSessionsService,
@@ -370,6 +377,12 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 	}
 
 	private updateActive(): void {
+		// Focus moving away right after typing must not lose the input's last report.
+		for (const r of this.inputReports.splice(0)) {
+			if (r.isScheduled()) {
+				r.flush();
+			}
+		}
 		this.widgetListeners.clear();
 		const focused = this.hostService.hasFocus;
 		const last = this.chatWidgetService.lastFocusedWidget;
@@ -380,6 +393,10 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 			this.widgetListeners.add(w.onDidChangeViewModel(() => this.updateActive()));
 			this.widgetListeners.add(w.inputEditor.onDidFocusEditorText(() => this.updateActive()));
 			this.widgetListeners.add(w.inputEditor.onDidBlurEditorText(() => this.updateActive()));
+			// The session's unsent input, once typing pauses: an `input` event in its log, if it is observed.
+			const report = this.widgetListeners.add(new RunOnceScheduler(() => this.reportInput(w), INPUT_SETTLE_MS));
+			this.inputReports.push(report);
+			this.widgetListeners.add(w.inputEditor.onDidChangeModelContent(() => report.schedule()));
 			const resource = w.viewModel?.sessionResource;
 			if (!resource || seen.has(resource) || !w.domNode.isConnected) {
 				continue;
@@ -393,6 +410,20 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 			this._active = out;
 			this._onDidChangeActiveSessions.fire(out);
 		}
+	}
+
+	private reportInput(w: IChatWidget): void {
+		const resource = w.viewModel?.sessionResource;
+		const log = resource ? this.logs.get(resource) : undefined;
+		if (!resource || !log) {
+			return;
+		}
+		const text = w.inputEditor.getModel()?.getValue() ?? '';
+		if (this.lastInput.get(resource) === text) {
+			return;
+		}
+		this.lastInput.set(resource, text);
+		void log.then(l => l.append([{ id: `input:${generateUuid()}`, at: Date.now(), kind: 'input', textLength: text.length, text }]), () => undefined);
 	}
 
 	// ---- navigation ----
