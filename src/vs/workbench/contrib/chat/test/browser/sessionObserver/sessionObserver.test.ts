@@ -370,7 +370,7 @@ suite('chatSessionObserver', () => {
 		const source = { priority: 0, canObserve: () => false, observe: async () => ({ dispose() { } }), dispose() { } };
 		const observer = store.add(new ChatSessionObserverService(
 			{ model } as never, widgets as never, { onDidChangeFocus: Event.None, hasFocus: false } as never, { isSessionsWindow: true } as never, {} as never,
-			{ createInstance: () => source } as never, new NullLogService(),
+			{ createInstance: () => source } as never, new NullLogService(), { onModelAdded: Event.None, getModels: () => [] } as never,
 		));
 		const changed = store.add(new Emitter<void>());
 		let listed = [info('agent-host-copilotcli:/a', 'Only in the window'), info('agent-host-copilotcli:/b', 'From the window')];

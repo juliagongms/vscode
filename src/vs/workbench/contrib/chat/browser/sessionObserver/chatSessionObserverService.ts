@@ -4,11 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Emitter, Event } from '../../../../../base/common/event.js';
-import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ResourceMap } from '../../../../../base/common/map.js';
 import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
+import { ITextModel } from '../../../../../editor/common/model.js';
+import { IModelService } from '../../../../../editor/common/services/model.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IWorkbenchEnvironmentService } from '../../../../services/environment/common/environmentService.js';
 import { IHostService } from '../../../../services/host/browser/host.js';
@@ -22,6 +24,7 @@ import { ActiveChatSessionHost, ChatSessionObservedStatus, IActiveChatSession, I
 import { IAgentSession } from '../agentSessions/agentSessionsModel.js';
 import { IAgentSessionsService } from '../agentSessions/agentSessionsService.js';
 import { IChatWidget, IChatWidgetService, isIChatResourceViewContext, isIChatViewViewContext } from '../chat.js';
+import { getChatQuestionAnswerSessionResource } from '../widget/chatContentParts/chatQuestionAnswerEditor.js';
 import { COPILOT_CLI_EH_SCHEME, COPILOT_CLI_LOCAL_AH_SCHEME } from '../copilotCliEventsUri.js';
 import { AgentHostTranscriptSource } from './agentHostTranscriptSource.js';
 import { ChatModelTranscriptSource } from './chatModelTranscriptSource.js';
@@ -166,6 +169,7 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 	private readonly widgetListeners = this._register(new DisposableStore());
 	/** What each observed session's input held when last reported, so an unchanged input isn't reported again. */
 	private readonly lastInput = new ResourceMap<string>();
+	private readonly answerBoxes = this._register(new DisposableMap<string, DisposableStore>());
 	private inputReports: RunOnceScheduler[] = [];
 
 	constructor(
@@ -176,6 +180,7 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 		@IEditorService private readonly editorService: IEditorService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@ILogService private readonly logService: ILogService,
+		@IModelService modelService: IModelService,
 	) {
 		super();
 		this._register(this.registerSource(this._register(instantiationService.createInstance(CopilotCliTranscriptSource))));
@@ -187,6 +192,10 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 		this._register(this.chatWidgetService.onDidChangeFocusedWidget(() => this.updateActive()));
 		this._register(this.chatWidgetService.onDidChangeFocusedSession(() => this.updateActive()));
 		this._register(this.hostService.onDidChangeFocus(() => this.updateActive()));
+		this._register(modelService.onModelAdded(m => this.watchAnswerBox(m)));
+		for (const m of modelService.getModels()) {
+			this.watchAnswerBox(m);
+		}
 		this.updateActive();
 	}
 
@@ -414,12 +423,35 @@ export class ChatSessionObserverService extends Disposable implements IChatSessi
 
 	private reportInput(w: IChatWidget): void {
 		const resource = w.viewModel?.sessionResource;
-		const log = resource ? this.logs.get(resource) : undefined;
-		if (!resource || !log) {
+		if (resource) {
+			this.reportText(resource, w.inputEditor.getModel()?.getValue() ?? '');
+		}
+	}
+
+	/**
+	 * The free-form answer box of an open question or plan review is where the user writes their answer,
+	 * so its text is the session's unsent input too, once typing pauses. When it closes, the chat input is again.
+	 */
+	private watchAnswerBox(model: ITextModel): void {
+		const session = getChatQuestionAnswerSessionResource(model.uri);
+		if (!session) {
 			return;
 		}
-		const text = w.inputEditor.getModel()?.getValue() ?? '';
-		if (this.lastInput.get(resource) === text) {
+		const key = model.uri.toString();
+		const store = new DisposableStore();
+		const report = store.add(new RunOnceScheduler(() => this.reportText(session, model.getValue()), INPUT_SETTLE_MS));
+		store.add(model.onDidChangeContent(() => report.schedule()));
+		store.add(model.onWillDispose(() => {
+			report.cancel();
+			this.reportText(session, this.chatWidgetService.getWidgetBySessionResource(session)?.inputEditor.getModel()?.getValue() ?? '');
+			this.answerBoxes.deleteAndDispose(key);
+		}));
+		this.answerBoxes.set(key, store);
+	}
+
+	private reportText(resource: URI, text: string): void {
+		const log = this.logs.get(resource);
+		if (!log || this.lastInput.get(resource) === text) {
 			return;
 		}
 		this.lastInput.set(resource, text);
