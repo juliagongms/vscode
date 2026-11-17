@@ -13,7 +13,7 @@ declare module 'vscode' {
 	export interface ChatDraftRequest {
 		readonly id: string;
 		readonly text: string;
-		/** The divider label, e.g. "Suggested by Rudder". */
+		/** The divider label, e.g. "Suggested by NAP". */
 		readonly label: string;
 		/** One line under the draft: why it was suggested. */
 		readonly detail?: string;

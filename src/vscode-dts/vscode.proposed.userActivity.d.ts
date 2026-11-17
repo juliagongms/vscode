@@ -7,7 +7,7 @@ declare module 'vscode' {
 
 	// What the user does in this window, as it happens: where they click, what they select, type,
 	// copy and paste, which editor, chat session, browser page or terminal they work in. Local to
-	// this machine; recorded only while an extension listens. https://github.com/juliagongms/vscode (rudder seams)
+	// this machine; recorded only while an extension listens. https://github.com/juliagongms/vscode (nap/seams)
 
 	/**
 	 * The kind of a {@link UserActivityEvent}.

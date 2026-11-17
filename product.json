@@ -87,19 +87,19 @@
 			}
 		},
 		{
-			"name": "rudder.rudder",
-			"version": "0.1.1",
-			"sha256": "d4319131a5b6dd4d9b93cdb8954ab3f7615121ee6a2edaf7784616f258e9f914",
-			"vsix": "build/builtin/rudder-0.1.1.vsix",
+			"name": "nap.nap-focus",
+			"version": "0.2.0",
+			"sha256": "5f5c7d1fc40653530eb50ade9522b1ec4dc8f8f48893472079f5e00f328b6937",
+			"vsix": "build/builtin/nap-focus-0.2.0.vsix",
 			"metadata": {
-				"id": "c87783cb-59c2-51f6-9750-b3932ec50f87",
+				"id": "de6577f2-e7d0-5a0d-a169-309bedbfc364",
 				"publisherId": {
-					"publisherId": "9fa1a79a-49bb-5fac-9a77-da6351dd5c88",
-					"publisherName": "rudder",
-					"displayName": "Rudder",
+					"publisherId": "b64b4cb1-5c4e-5e50-9d2d-a5101e02a4e7",
+					"publisherName": "nap",
+					"displayName": "Next Action Prediction",
 					"flags": ""
 				},
-				"publisherDisplayName": "Rudder"
+				"publisherDisplayName": "Next Action Prediction"
 			}
 		}
 	],
@@ -174,10 +174,12 @@
 	},
 	"trustedExtensionAuthAccess": {
 		"github": [
-			"GitHub.copilot-chat"
+			"GitHub.copilot-chat",
+			"nap.nap-focus"
 		],
 		"github-enterprise": [
-			"GitHub.copilot-chat"
+			"GitHub.copilot-chat",
+			"nap.nap-focus"
 		],
 		"microsoft": [
 			"vscode.github-authentication"
