@@ -94,9 +94,11 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 			handleEndOfLifetime: (_list, item, reason) => this.onEnd(item, reason),
 			disposeInlineCompletions: () => { },
 		};
-		for (const scheme of [Schemas.vscodeChatInput, Schemas.sessionsChatInput, CHAT_QUESTION_ANSWER_SCHEME]) {
+		for (const scheme of [Schemas.vscodeChatInput, Schemas.sessionsChatInput]) {
 			this._register(languageFeaturesService.inlineCompletionsProvider.register({ scheme }, provider));
 		}
+		// An answer box's model is a simple widget's, which a selector reaches only with access to all models.
+		this._register(languageFeaturesService.inlineCompletionsProvider.register({ scheme: CHAT_QUESTION_ANSWER_SCHEME, hasAccessToAllModels: true }, provider));
 
 		// Chat inputs keep inline suggestions off unless Copilot's chat completions are on; a
 		// pushed suggestion turns them on for the inputs bound to its session, while it lasts.
