@@ -254,9 +254,12 @@ suite('chatSessionObserver', () => {
 		provider.handleEndOfLifetime?.({ items: [shown] }, shown, { kind: InlineCompletionEndOfLifeReasonKind.Accepted, alternativeAction: false }, undefined as never);
 		input.setValue('Not yet, first show me the full diff.');
 		assert.strictEqual(service.setSuggestion('ext', session, { id: 'r5', text: 'Not yet, first show me the full diff. Then commit.' }), false);
+		// Once they cleared it and began another reply, it no longer holds what Tab took in.
+		input.setValue('Make it shorter');
+		assert.strictEqual(service.setSuggestion('ext', session, { id: 'r6', text: 'Make it shorter, please.' }), true);
 		// An empty input takes any.
 		input.setValue('');
-		assert.strictEqual(service.setSuggestion('ext', session, { id: 'r6', text: 'Commit it.' }), true);
+		assert.strictEqual(service.setSuggestion('ext', session, { id: 'r7', text: 'Commit it.' }), true);
 	});
 
 	test('answer surfaces: a new answer is taken only if its words go on from what the answer box holds', () => {

@@ -313,7 +313,12 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		if (!typed.every(t => textOf(next).startsWith(norm(t)))) {
 			return false;
 		}
-		return !prev || !!prev.dismissed || (!prev.accepted && !typed.every(t => textOf(prev.suggestion).startsWith(norm(t))));
+		if (!prev || prev.dismissed) {
+			return true;
+		}
+		// Taken in with Tab: theirs while the input still holds it (as a submission links to it), not once they cleared it.
+		const editingTaken = !!prev.accepted && typed.every(t => norm(t).startsWith(norm(prev.accepted!.text).slice(0, Math.max(1, Math.min(prev.accepted!.chars, 20)))));
+		return !editingTaken && !typed.every(t => textOf(prev.suggestion).startsWith(norm(t)));
 	}
 
 	getSuggestion(session: URI): (IChatInputSuggestion & { readonly owner: string }) | undefined {
