@@ -121,8 +121,8 @@ export class MainThreadChatSessionObserver extends Disposable implements MainThr
 		return this.observer.openEditDiff(URI.revive(resource), eventId);
 	}
 
-	$setChatInputSuggestion(resource: UriComponents, suggestion: IChatInputSuggestion | undefined): void {
-		this.suggestions.setSuggestion(this.owner, URI.revive(resource), suggestion);
+	async $setChatInputSuggestion(resource: UriComponents, suggestion: IChatInputSuggestion | undefined): Promise<boolean> {
+		return this.suggestions.setSuggestion(this.owner, URI.revive(resource), suggestion);
 	}
 
 	$setChatSessionAnnotations(resource: UriComponents, annotations: IChatSessionAnnotationDto[]): void {

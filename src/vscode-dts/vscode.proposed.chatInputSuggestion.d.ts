@@ -74,8 +74,13 @@ declare module 'vscode' {
 	}
 
 	export namespace chat {
-		/** Set (or clear, with `undefined`) the suggestion for a session. */
-		export function setChatInputSuggestion(session: Uri, suggestion: ChatInputSuggestion | undefined): void;
+		/**
+		 * Set (or clear, with `undefined`) the suggestion for a session. Resolves `false` when the editor kept
+		 * what the session's input offers instead, so as never to drop what the user typed: the new one
+		 * doesn't go on from their words (case and spacing aside), or they are typing along, or editing
+		 * after Tab, the one it would replace.
+		 */
+		export function setChatInputSuggestion(session: Uri, suggestion: ChatInputSuggestion | undefined): Thenable<boolean>;
 		export const onDidChangeChatInputSuggestion: Event<ChatInputSuggestionEvent>;
 		/** Every message, answer or plan decision the user sends to a session, in this window. */
 		export const onDidSendChatRequest: Event<ChatRequestSubmission>;

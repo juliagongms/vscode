@@ -227,8 +227,11 @@ export const IChatInputSuggestionService = createDecorator<IChatInputSuggestionS
 
 export interface IChatInputSuggestionService {
 	readonly _serviceBrand: undefined;
-	/** One suggestion per session; the latest owner (extension id) to set one wins. */
-	setSuggestion(owner: string, session: URI, suggestion: IChatInputSuggestion | undefined): void;
+	/**
+	 * One suggestion per session; the latest owner (extension id) to set one wins. Returns false when it
+	 * kept what the session's inputs offer instead, so as never to drop what the user typed.
+	 */
+	setSuggestion(owner: string, session: URI, suggestion: IChatInputSuggestion | undefined): boolean;
 	getSuggestion(session: URI): (IChatInputSuggestion & { readonly owner: string }) | undefined;
 	readonly onDidChangeSuggestions: Event<URI>;
 	readonly onDidChangeSuggestionState: Event<IChatInputSuggestionEvent>;

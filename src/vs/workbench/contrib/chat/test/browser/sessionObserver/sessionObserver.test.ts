@@ -15,6 +15,8 @@ import { Schemas } from '../../../../../../base/common/network.js';
 import { InlineCompletionEndOfLifeReasonKind, InlineCompletionTriggerKind } from '../../../../../../editor/common/languages.js';
 import { LanguageFeaturesService } from '../../../../../../editor/common/services/languageFeaturesService.js';
 import { createTextModel } from '../../../../../../editor/test/common/testTextModel.js';
+import { ITextModel } from '../../../../../../editor/common/model.js';
+import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { TestConfigurationService } from '../../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { ChatInputSuggestionService } from '../../../browser/sessionObserver/chatInputSuggestionService.js';
 import { IChatWidget, IChatWidgetService } from '../../../browser/chat.js';
@@ -127,7 +129,8 @@ suite('chatSessionObserver', () => {
 		const observer = { activeSessions: [{ resource: session, host: 'chatView' }] } as unknown as IChatSessionObserverService;
 		const features = new LanguageFeaturesService();
 		const drafts = store.add(new ChatDraftRequestService());
-		const service = store.add(new ChatInputSuggestionService(features, widgets, chatService, observer, drafts, new TestConfigurationService()));
+		const models: ITextModel[] = [];
+		const service = store.add(new ChatInputSuggestionService(features, widgets, chatService, observer, drafts, new TestConfigurationService(), { getModels: () => models } as unknown as IModelService));
 		const states: IChatInputSuggestionEvent[] = [];
 		const submissions: IChatRequestSubmission[] = [];
 		store.add(service.onDidChangeSuggestionState(e => states.push(e)));
@@ -176,14 +179,15 @@ suite('chatSessionObserver', () => {
 		const observer = { activeSessions: [{ resource: session, host: 'agentsWindow' }] } as unknown as IChatSessionObserverService;
 		const features = new LanguageFeaturesService();
 		const drafts = store.add(new ChatDraftRequestService());
-		const service = store.add(new ChatInputSuggestionService(features, widgets, chatService, observer, drafts, new TestConfigurationService()));
+		const models: ITextModel[] = [];
+		const service = store.add(new ChatInputSuggestionService(features, widgets, chatService, observer, drafts, new TestConfigurationService(), { getModels: () => models } as unknown as IModelService));
 		const states: IChatInputSuggestionEvent[] = [];
 		const submissions: IChatRequestSubmission[] = [];
 		store.add(service.onDidChangeSuggestionState(e => states.push(e)));
 		store.add(service.onDidSubmitRequest(e => submissions.push(e)));
 		const ctx = { triggerKind: InlineCompletionTriggerKind.Automatic, selectedSuggestionInfo: undefined, includeInlineEdits: false, includeInlineCompletions: true, requestIssuedDateTime: 0, earliestShownDateTime: 0 } as never;
 		const provide = async (model = input) => (await features.inlineCompletionsProvider.all(model)[0].provideInlineCompletions(model, model.getFullModelRange().getEndPosition(), ctx, CancellationToken.None))?.items[0];
-		return { service, states, submissions, provide, provider: features.inlineCompletionsProvider.all(input)[0] };
+		return { service, states, submissions, provide, provider: features.inlineCompletionsProvider.all(input)[0], input, models };
 	}
 
 	test('answer surfaces: a shown carousel takes the answer from the input; the suggested pick accepts it', async () => {
@@ -230,6 +234,43 @@ suite('chatSessionObserver', () => {
 		assert.strictEqual((await provide())?.insertText, 'Pick Helmsignal.');
 	});
 
+	test('input suggestions: a new one is taken only if it keeps every word typed, and never replaces one being typed along or taken in', async () => {
+		const session = URI.parse('agent-host-copilotcli:/s5');
+		const { service, provide, provider, input } = suggestionHarness(session);
+		assert.strictEqual(service.setSuggestion('ext', session, { id: 'r1', text: 'Commit it, but don\'t push yet.' }), true);
+		input.setValue('Not yet, first');
+		// It would drop their words: not taken, and the one there stays.
+		assert.strictEqual(service.setSuggestion('ext', session, { id: 'r2', text: 'Show me the diff first.' }), false);
+		assert.strictEqual(service.getSuggestion(session)?.id, 'r1');
+		// It goes on from them: taken, and shown.
+		assert.strictEqual(service.setSuggestion('ext', session, { id: 'r3', text: 'Not yet, first show me the diff.' }), true);
+		assert.strictEqual((await provide())?.insertText, 'Not yet, first show me the diff.');
+		// They type along it: a newer one that also fits doesn't change it under them.
+		input.setValue('Not yet, first show');
+		assert.strictEqual(service.setSuggestion('ext', session, { id: 'r4', text: 'Not yet, first show the tests.' }), false);
+		// Tab took it in, and they edit it: it stays theirs.
+		const shown = (await provide())!;
+		provider.handleItemDidShow?.({ items: [shown] }, shown, '', undefined as never);
+		provider.handleEndOfLifetime?.({ items: [shown] }, shown, { kind: InlineCompletionEndOfLifeReasonKind.Accepted, alternativeAction: false }, undefined as never);
+		input.setValue('Not yet, first show me the full diff.');
+		assert.strictEqual(service.setSuggestion('ext', session, { id: 'r5', text: 'Not yet, first show me the full diff. Then commit.' }), false);
+		// An empty input takes any.
+		input.setValue('');
+		assert.strictEqual(service.setSuggestion('ext', session, { id: 'r6', text: 'Commit it.' }), true);
+	});
+
+	test('answer surfaces: a new answer is taken only if its words go on from what the answer box holds', () => {
+		const session = URI.parse('agent-host-copilotcli:/s6');
+		const { service, models } = suggestionHarness(session);
+		const answerBox = store.add(createTextModel('', null, undefined, URI.from({ scheme: CHAT_QUESTION_ANSWER_SCHEME, path: '/a6', query: session.toString() })));
+		models.push(answerBox);
+		const claim = service.claimAnswerSurface(session);
+		answerBox.setValue('Option 1, but drop the');
+		assert.strictEqual(service.setSuggestion('ext', session, { id: 'a1', answer: { questionId: 'q1', selectedOptions: ['Option 2'], freeform: 'Shorter, please.' } }), false);
+		assert.strictEqual(service.setSuggestion('ext', session, { id: 'a2', answer: { questionId: 'q1', selectedOptions: ['Option 1'], freeform: 'Option 1, but drop the parentheses.' } }), true);
+		claim.dispose();
+	});
+
 	test('input suggestions: a widget switching sessions drops the last session\'s ghost text before showing the new one\'s', async () => {
 		const a = URI.parse('agent-host-copilotcli:/a');
 		const b = URI.parse('agent-host-copilotcli:/b');
@@ -245,7 +286,7 @@ suite('chatSessionObserver', () => {
 		const widgets = { getAllWidgets: () => [widget], onDidAddWidget: Event.None, onDidRemoveWidget: Event.None } as unknown as IChatWidgetService;
 		const observer = { activeSessions: [{ resource: a, host: 'agentsWindow' }, { resource: b, host: 'agentsWindow' }] } as unknown as IChatSessionObserverService;
 		const features = new LanguageFeaturesService();
-		const service = store.add(new ChatInputSuggestionService(features, widgets, { onDidAcceptRequest: Event.None } as unknown as IChatService, observer, store.add(new ChatDraftRequestService()), new TestConfigurationService()));
+		const service = store.add(new ChatInputSuggestionService(features, widgets, { onDidAcceptRequest: Event.None } as unknown as IChatService, observer, store.add(new ChatDraftRequestService()), new TestConfigurationService(), { getModels: () => [] } as unknown as IModelService));
 		const ctx = { triggerKind: InlineCompletionTriggerKind.Automatic, selectedSuggestionInfo: undefined, includeInlineEdits: false, includeInlineCompletions: true, requestIssuedDateTime: 0, earliestShownDateTime: 0 } as never;
 		const provide = async () => (await features.inlineCompletionsProvider.all(input)[0].provideInlineCompletions(input, input.getFullModelRange().getEndPosition(), ctx, CancellationToken.None))?.items[0];
 

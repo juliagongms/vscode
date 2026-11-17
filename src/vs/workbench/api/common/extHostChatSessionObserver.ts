@@ -274,8 +274,8 @@ export class ExtHostChatSessionObserver implements ExtHostChatSessionObserverSha
 
 	// ---- chatInputSuggestion ----
 
-	setChatInputSuggestion(session: vscode.Uri, suggestion: vscode.ChatInputSuggestion | undefined): void {
-		this.proxy.$setChatInputSuggestion(session, suggestion ? {
+	setChatInputSuggestion(session: vscode.Uri, suggestion: vscode.ChatInputSuggestion | undefined): Promise<boolean> {
+		return this.proxy.$setChatInputSuggestion(session, suggestion ? {
 			id: suggestion.id,
 			...(suggestion.validForTurn ? { validForTurn: suggestion.validForTurn } : {}),
 			...(suggestion.text !== undefined ? { text: suggestion.text } : {}),

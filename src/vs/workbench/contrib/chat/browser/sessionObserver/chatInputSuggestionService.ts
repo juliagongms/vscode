@@ -18,6 +18,7 @@ import { EditorOption } from '../../../../../editor/common/config/editorOptions.
 import { InlineCompletion, InlineCompletionContext, InlineCompletionEndOfLifeReason, InlineCompletionEndOfLifeReasonKind, InlineCompletions, InlineCompletionsProvider } from '../../../../../editor/common/languages.js';
 import { ITextModel } from '../../../../../editor/common/model.js';
 import { ILanguageFeaturesService } from '../../../../../editor/common/services/languageFeatures.js';
+import { IModelService } from '../../../../../editor/common/services/model.js';
 import { InlineCompletionsController } from '../../../../../editor/contrib/inlineCompletions/browser/controller/inlineCompletionsController.js';
 import { ChatRequestQueueKind, IChatService } from '../../common/chatService/chatService.js';
 import { ActiveChatSessionHost, ChatInputSuggestionState, IChatDraftRequestService, IChatInputSuggestion, IChatInputSuggestionEvent, IChatInputSuggestionService, IChatRequestSubmission, IChatSessionObserverService } from '../../common/sessionObserver/chatSessionObserver.js';
@@ -82,6 +83,7 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		@IChatSessionObserverService private readonly observer: IChatSessionObserverService,
 		@IChatDraftRequestService private readonly drafts: IChatDraftRequestService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IModelService private readonly modelService: IModelService,
 	) {
 		super();
 		const provider: InlineCompletionsProvider<ISuggestionList> = {
@@ -263,8 +265,11 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		return this.chatWidgetService.getAllWidgets().find(w => w.inputEditor.getModel() === model);
 	}
 
-	setSuggestion(owner: string, session: URI, suggestion: IChatInputSuggestion | undefined): void {
+	setSuggestion(owner: string, session: URI, suggestion: IChatInputSuggestion | undefined): boolean {
 		const prev = this.entries.get(session);
+		if (suggestion && prev?.suggestion.id !== suggestion.id && !this.takes(session, suggestion, prev)) {
+			return false;
+		}
 		if (prev && (!suggestion || prev.suggestion.id !== suggestion.id)) {
 			this.fire(session, prev, suggestion ? 'superseded' : 'invalidated');
 		}
@@ -277,7 +282,7 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		this._onDidChangeSuggestions.fire(session);
 		if (!suggestion) {
 			this.restore(session);
-			return;
+			return true;
 		}
 		// Show it at once in every visible input on the session, focused or not.
 		for (const w of this.chatWidgetService.getAllWidgets()) {
@@ -285,6 +290,30 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 				this.showIn(w);
 			}
 		}
+		return true;
+	}
+
+	/**
+	 * Whether a new suggestion may take the place of what the session's inputs offer now, as the user has
+	 * them this moment. It must go on from every word they typed (case and spacing aside), else it would
+	 * drop them. And while they type along the one there, or edit it after Tab took it in, that one stays,
+	 * so the ghost text doesn't change under them.
+	 */
+	private takes(session: URI, next: IChatInputSuggestion, prev: IEntry | undefined): boolean {
+		// An answer goes in the question's answer box while it shows; anything else in the chat input.
+		const inAnswerBox = !!next.answer && this.answerSurfaces.has(session);
+		const typed = (inAnswerBox
+			? this.modelService.getModels().filter(m => getChatQuestionAnswerSessionResource(m.uri)?.toString() === session.toString()).map(m => m.getValue())
+			: this.chatWidgetService.getAllWidgets().filter(w => w.viewModel?.sessionResource.toString() === session.toString()).map(w => w.inputEditor.getModel()?.getValue() ?? '')
+		).filter(t => t.trim());
+		if (!typed.length) {
+			return true;
+		}
+		const textOf = (s: IChatInputSuggestion) => norm(inAnswerBox ? s.answer?.freeform ?? '' : suggestionText(s));
+		if (!typed.every(t => textOf(next).startsWith(norm(t)))) {
+			return false;
+		}
+		return !prev || !!prev.dismissed || (!prev.accepted && !typed.every(t => textOf(prev.suggestion).startsWith(norm(t))));
 	}
 
 	getSuggestion(session: URI): (IChatInputSuggestion & { readonly owner: string }) | undefined {
