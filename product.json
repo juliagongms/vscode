@@ -85,6 +85,22 @@
 				},
 				"publisherDisplayName": "Microsoft"
 			}
+		},
+		{
+			"name": "rudder.rudder",
+			"version": "0.1.1",
+			"sha256": "d4319131a5b6dd4d9b93cdb8954ab3f7615121ee6a2edaf7784616f258e9f914",
+			"vsix": "build/builtin/rudder-0.1.1.vsix",
+			"metadata": {
+				"id": "c87783cb-59c2-51f6-9750-b3932ec50f87",
+				"publisherId": {
+					"publisherId": "9fa1a79a-49bb-5fac-9a77-da6351dd5c88",
+					"publisherName": "rudder",
+					"displayName": "Rudder",
+					"flags": ""
+				},
+				"publisherDisplayName": "Rudder"
+			}
 		}
 	],
 	"defaultChatAgent": {
