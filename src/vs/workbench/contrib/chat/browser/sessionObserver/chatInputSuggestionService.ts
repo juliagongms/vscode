@@ -26,6 +26,21 @@ import { IChatWidget, IChatWidgetService } from '../chat.js';
 import { CHAT_QUESTION_ANSWER_SCHEME, getChatQuestionAnswerSessionResource } from '../widget/chatContentParts/chatQuestionAnswerEditor.js';
 import { chatInputInlineCompletionsSetting } from '../widget/input/editor/chatInputInlineSuggestions.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { KeyCode } from '../../../../../base/common/keyCodes.js';
+import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
+import { KeybindingsRegistry, KeybindingWeight } from '../../../../../platform/keybinding/common/keybindingsRegistry.js';
+import { hideInlineCompletionId } from '../../../../../editor/contrib/inlineCompletions/browser/controller/commandIds.js';
+import { InlineCompletionContextKeys } from '../../../../../editor/contrib/inlineCompletions/browser/controller/inlineCompletionContextKeys.js';
+import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
+
+// Esc hides a suggestion in a chat input as it does in any editor. The editor's own rule needs
+// `editorTextFocus`, which a chat input (a simple widget) never sets, so there Esc did nothing.
+KeybindingsRegistry.registerKeybindingRule({
+	id: hideInlineCompletionId,
+	weight: KeybindingWeight.EditorContrib + 90,
+	primary: KeyCode.Escape,
+	when: ContextKeyExpr.and(ChatContextKeys.inChatInput, ContextKeyExpr.or(InlineCompletionContextKeys.inlineSuggestionVisible, InlineCompletionContextKeys.inlineEditVisible)),
+});
 
 /** An editor placeholder that renders nothing, set while a pushed suggestion shows. */
 const HIDDEN_PLACEHOLDER = ' ';
