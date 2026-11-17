@@ -241,6 +241,18 @@ export class ChatQuestionAnswerEditor extends Disposable {
 		this._editor.focus();
 	}
 
+	/** The caret's offset in the text. */
+	caretOffset(): number {
+		const position = this._editor.getPosition();
+		return position ? this._model.getOffsetAt(position) : this._model.getValueLength();
+	}
+
+	/** Focuses it with the caret at this offset. */
+	focusAt(offset: number): void {
+		this._editor.focus();
+		this._editor.setPosition(this._model.getPositionAt(offset));
+	}
+
 	/** Whether the editor's text area has focus. */
 	hasFocus(): boolean {
 		return this._editor.hasTextFocus();

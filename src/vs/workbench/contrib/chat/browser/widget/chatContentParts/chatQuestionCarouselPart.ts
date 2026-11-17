@@ -256,8 +256,14 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			this._answerClaim.value = this._suggestions.claimAnswerSurface(session);
 			this._register(this._suggestions.onDidChangeSuggestions(uri => {
 				if (uri.toString() === session.toString() && this._answerClaim.value && !this.carousel.isUsed) {
+					// A new suggestion often comes while the user is typing an answer: keep their focus and caret.
+					const typing = ([this._freeformAnswerEditors, this._textAnswerEditors] as const)
+						.flatMap(editors => [...editors].filter(([, e]) => e.hasFocus()).map(([id, e]) => ({ editors, id, caret: e.caretOffset() })))[0];
 					this.saveCurrentAnswer();
 					this.renderCurrentQuestion();
+					if (typing) {
+						typing.editors.get(typing.id)?.focusAt(typing.caret);
+					}
 				}
 			}));
 		}
