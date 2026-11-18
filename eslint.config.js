@@ -1122,6 +1122,7 @@ export default defineConfig(
 						'register',
 						'remove',
 						'rename',
+						'record',
 						'reveal',
 						'save',
 						'send',

@@ -741,6 +741,10 @@
 			"project": "vscode-sessions"
 		},
 		{
+			"name": "vs/sessions/contrib/chatSessionPanels",
+			"project": "vscode-sessions"
+		},
+		{
 			"name": "vs/sessions/contrib/chatEditor",
 			"project": "vscode-sessions"
 		},

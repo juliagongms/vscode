@@ -2044,7 +2044,9 @@ export const enum ChatRequestQueueKind {
 	/** Request is queued to be sent after current request completes */
 	Queued = 'queued',
 	/** Request is queued and signals the active request to yield */
-	Steering = 'steering'
+	Steering = 'steering',
+	/** A suggested message (proposed API `chatDraftRequests`): shown in the pending list, never sent on its own */
+	Draft = 'draft'
 }
 
 /**
@@ -2177,6 +2179,10 @@ export interface IChatRequestSubmittedEvent {
 export interface IChatRequestAcceptedEvent {
 	readonly chatSessionResource: URI;
 	readonly isNewSession: boolean;
+	/** The submitted text, as the user sent it. */
+	readonly text?: string;
+	/** Set when the submission was queued or sent as a steering message rather than sent at once. */
+	readonly queue?: ChatRequestQueueKind;
 }
 
 export const IChatService = createDecorator<IChatService>('IChatService');
