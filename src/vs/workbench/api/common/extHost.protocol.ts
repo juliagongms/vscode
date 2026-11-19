@@ -4108,6 +4108,8 @@ export type ChatInputNotificationDto = {
 	dismissible: boolean;
 	autoDismissOnMessage: boolean;
 	sessionTypes: readonly string[] | undefined;
+	sessionResources: UriComponents[] | undefined;
+	icon: string | undefined;
 };
 
 export interface MainThreadChatInputNotificationShape {

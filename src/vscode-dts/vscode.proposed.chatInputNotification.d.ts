@@ -97,6 +97,17 @@ declare module 'vscode' {
 		sessionTypes: readonly string[] | undefined;
 
 		/**
+		 * Optional chat sessions in which this notification is shown, e.g. an offer that only one session needs.
+		 * When omitted, the notification is shown in every session its {@link sessionTypes} allow.
+		 */
+		sessionResources: readonly Uri[] | undefined;
+
+		/**
+		 * Optional icon shown before the message. Defaults to the severity's icon.
+		 */
+		icon: ThemeIcon | undefined;
+
+		/**
 		 * Shows the notification in the chat input area.
 		 */
 		show(): void;

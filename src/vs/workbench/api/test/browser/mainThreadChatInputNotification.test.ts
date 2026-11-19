@@ -12,6 +12,8 @@ import { nullExtensionDescription } from '../../../services/extensions/common/ex
 import { MainThreadChatInputNotification } from '../../browser/mainThreadChatInputNotification.js';
 import { ExtHostChatInputNotification } from '../../common/extHostChatInputNotification.js';
 import { SingleProxyRPCProtocol } from '../common/testRPCProtocol.js';
+import { URI } from '../../../../base/common/uri.js';
+import { ThemeIcon } from '../../common/extHostTypes.js';
 
 suite('MainThreadChatInputNotification', () => {
 
@@ -47,6 +49,24 @@ suite('MainThreadChatInputNotification', () => {
 			undefined,
 			['local', 'agent-host-copilotcli'],
 			undefined,
+		]);
+	});
+
+	test('scopes a notification to the sessions it names, with its own icon', () => {
+		const { notification, pushed } = createBridge();
+		const session = URI.parse('copilotcli:/session-1');
+
+		notification.message = 'This looks like it needs Slack';
+		notification.sessionResources = [session];
+		notification.icon = new ThemeIcon('plug');
+		notification.show();
+		notification.sessionResources = undefined;
+		notification.icon = undefined;
+
+		assert.deepStrictEqual(pushed.map(entry => [entry.sessionResources?.map(r => r.toString()), entry.icon?.id]), [
+			[[session.toString()], 'plug'],
+			[undefined, 'plug'],
+			[undefined, undefined],
 		]);
 	});
 
