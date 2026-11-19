@@ -106,6 +106,7 @@ import './mainThreadChatInputNotification.js';
 import './mainThreadChatOutputRenderer.js';
 import './mainThreadChatSessions.js';
 import './mainThreadChatSessionObserver.js';
+import './mainThreadChatCustomizations.js';
 import './mainThreadUserActivity.js';
 import './mainThreadDataChannels.js';
 import './mainThreadMeteredConnection.js';

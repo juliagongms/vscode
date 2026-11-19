@@ -182,6 +182,8 @@ export interface IProductConfiguration {
 		readonly description: string;
 		readonly iconUrl: string;
 		readonly urls?: readonly string[];
+		/** Other names people use for the connector, e.g. `Jira` for Atlassian Rovo. */
+		readonly aliases?: readonly string[];
 	}>;
 	readonly configBasedExtensionTips?: IStringDictionary<IConfigBasedExtensionTip>;
 	readonly exeBasedExtensionTips?: IStringDictionary<IExeBasedExtensionTip>;

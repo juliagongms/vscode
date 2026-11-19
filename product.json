@@ -264,5 +264,114 @@
 		"GitHub.copilot-chat"
 	],
 	"sessionsWindowAllowedExtensions": [],
+	"connectorRecommendations": {
+		"githubcopilotslackmcp": {
+			"name": "Slack",
+			"description": "Search and interact with Slack conversations and workspace content.",
+			"iconUrl": "",
+			"urls": [
+				"slack.com"
+			]
+		},
+		"githubcopilotlinearmcp": {
+			"name": "Linear",
+			"description": "Find, create, and update issues, projects, and comments in Linear.",
+			"iconUrl": "",
+			"urls": [
+				"linear.app"
+			]
+		},
+		"githubcopilotnotionmcp": {
+			"name": "Notion",
+			"description": "Search and manage Notion pages, databases, and workspace content.",
+			"iconUrl": "",
+			"urls": [
+				"notion.so",
+				"notion.site"
+			]
+		},
+		"workiqmcp": {
+			"name": "Work IQ",
+			"description": "Query Microsoft 365 data with natural language — emails, meetings, documents, Teams messages, and more.",
+			"iconUrl": "",
+			"aliases": [
+				"WorkIQ",
+				"Teams",
+				"Outlook",
+				"SharePoint",
+				"OneDrive"
+			],
+			"urls": [
+				"microsoft365.com",
+				"office.com",
+				"outlook.office.com",
+				"outlook.office365.com",
+				"sharepoint.com",
+				"teams.microsoft.com"
+			]
+		},
+		"kusto": {
+			"name": "Azure Data Explorer",
+			"description": "Run Kusto queries and explore data in Azure Data Explorer.",
+			"iconUrl": "",
+			"aliases": [
+				"Kusto",
+				"ADX"
+			],
+			"urls": [
+				"dataexplorer.azure.com",
+				"kusto.windows.net"
+			]
+		},
+		"githubcopilotsentrymcp": {
+			"name": "Sentry",
+			"description": "Search errors, analyze performance, triage issues, read documentation, and manage Sentry projects.",
+			"iconUrl": "",
+			"urls": [
+				"sentry.io"
+			]
+		},
+		"githubcopilotatlassianrovomcp": {
+			"name": "Atlassian Rovo",
+			"description": "Search and manage Jira and Confluence content with Atlassian Rovo.",
+			"iconUrl": "",
+			"aliases": [
+				"Jira",
+				"Confluence",
+				"Atlassian"
+			],
+			"urls": [
+				"atlassian.net"
+			]
+		},
+		"githubcopilotgrafanamcp": {
+			"name": "Grafana Cloud",
+			"description": "Query metrics, logs, and dashboards in Grafana Cloud.",
+			"iconUrl": "",
+			"aliases": [
+				"Grafana"
+			],
+			"urls": [
+				"grafana.net"
+			]
+		},
+		"githubcopilotfigmamcp": {
+			"name": "Figma",
+			"description": "Access Figma design files and design context.",
+			"iconUrl": "",
+			"urls": [
+				"figma.com"
+			]
+		},
+		"githubcopilotvercelmcp": {
+			"name": "Vercel",
+			"description": "Inspect and manage Vercel projects and deployments.",
+			"iconUrl": "",
+			"urls": [
+				"vercel.app",
+				"vercel.com"
+			]
+		}
+	},
 	"voiceWsUrl": "wss://falcon-caas.mai.microsoft.com/voice-code/api/v1/realtime/voice"
 }
