@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../base/common/lifecycle.js';
+import { ThemeIcon } from '../../../base/common/themables.js';
+import { URI } from '../../../base/common/uri.js';
 import { ChatInputNotificationActionKind, ChatInputNotificationSeverity, IChatInputNotificationCommandAction, IChatInputNotificationService } from '../../contrib/chat/browser/widget/input/chatInputNotificationService.js';
 import { IExtHostContext, extHostNamedCustomer } from '../../services/extensions/common/extHostCustomers.js';
 import { ChatInputNotificationDto, MainContext, MainThreadChatInputNotificationShape } from '../common/extHost.protocol.js';
@@ -28,6 +30,8 @@ export class MainThreadChatInputNotification extends Disposable implements MainT
 			dismissible: notification.dismissible,
 			autoDismissOnMessage: notification.autoDismissOnMessage,
 			sessionTypes: notification.sessionTypes,
+			...(notification.sessionResources?.length ? { sessionResources: notification.sessionResources.map(uri => URI.revive(uri)) } : {}),
+			...(notification.icon ? { icon: ThemeIcon.fromId(notification.icon) } : {}),
 		});
 	}
 

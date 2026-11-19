@@ -34,7 +34,11 @@ export class ExtHostChatInputNotification {
 			dismissible: true,
 			autoDismissOnMessage: false,
 			sessionTypes: undefined,
+			sessionResources: undefined,
+			icon: undefined,
 		};
+		let sessionResources: readonly vscode.Uri[] | undefined;
+		let icon: vscode.ThemeIcon | undefined;
 
 		let disposed = false;
 		let visible = false;
@@ -106,6 +110,24 @@ export class ExtHostChatInputNotification {
 			},
 			set sessionTypes(value: readonly string[] | undefined) {
 				state.sessionTypes = value;
+				syncState();
+			},
+
+			get sessionResources(): readonly vscode.Uri[] | undefined {
+				return sessionResources;
+			},
+			set sessionResources(value: readonly vscode.Uri[] | undefined) {
+				sessionResources = value;
+				state.sessionResources = value ? [...value] : undefined;
+				syncState();
+			},
+
+			get icon(): vscode.ThemeIcon | undefined {
+				return icon;
+			},
+			set icon(value: vscode.ThemeIcon | undefined) {
+				icon = value;
+				state.icon = value?.id;
 				syncState();
 			},
 
