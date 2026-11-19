@@ -22,7 +22,7 @@ interface IConnectorRecommendation {
 	readonly id: string;
 	readonly name: string;
 	readonly description: string;
-	readonly icon: URI;
+	readonly icon: URI | undefined;
 }
 
 export class NewChatConnectorRecommendations extends Disposable implements IChatTipProvider {
@@ -59,7 +59,7 @@ export class NewChatConnectorRecommendations extends Disposable implements IChat
 		}
 
 		for (const [id, recommendation] of Object.entries(productService.connectorRecommendations ?? {})) {
-			this._recommendations.set(id, { id, name: recommendation.name, description: recommendation.description, icon: URI.parse(recommendation.iconUrl) });
+			this._recommendations.set(id, { id, name: recommendation.name, description: recommendation.description, icon: recommendation.iconUrl ? URI.parse(recommendation.iconUrl) : undefined });
 			this._recommendationUrls.set(id, recommendation.urls ?? []);
 		}
 

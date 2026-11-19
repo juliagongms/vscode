@@ -73,6 +73,7 @@ import { IChatContextItem } from '../../contrib/chat/common/contextContrib/chatC
 import { IChatProgressHistoryResponseContent, IChatRequestModeInstructions, IChatRequestVariableData } from '../../contrib/chat/common/model/chatModel.js';
 import { ChatResponseClearToPreviousToolInvocationReason, IChatContentInlineReference, IChatExternalEditsDto, IChatFollowup, IChatMultiDiffData, IChatMultiDiffDataSerialized, IChatNotebookEdit, IChatProgress, IChatTask, IChatTaskDto, IChatUserActionEvent, IChatVoteAction } from '../../contrib/chat/common/chatService/chatService.js';
 import { IChatSessionItem, IChatSessionProviderOptionGroup, IChatSessionProviderOptionItem } from '../../contrib/chat/common/chatSessionsService.js';
+import type { ChatCustomizationState, IChatCustomizationInfo } from '../../contrib/chat/common/chatCustomizationsInventory.js';
 import { IChatRequestVariableValue } from '../../contrib/chat/common/attachments/chatVariables.js';
 import { ChatAgentLocation } from '../../contrib/chat/common/constants.js';
 import { IChatMessage, IChatResponsePart, ILanguageModelChatInfoOptions, ILanguageModelChatMetadataAndIdentifier, ILanguageModelChatRequestOptions, ILanguageModelChatSelector } from '../../contrib/chat/common/languageModels.js';
@@ -4225,6 +4226,21 @@ export interface ExtHostUserActivityShape {
 	$acceptUserActivity(events: IUserActivityEventDto[]): void;
 }
 
+// ---- Chat customizations (proposed API chatCustomizations) ----
+
+export interface MainThreadChatCustomizationsShape extends IDisposable {
+	/** The customizations a session could use, each with its state for that session; without a session, outside any one. */
+	$getChatCustomizations(session: UriComponents | undefined): Promise<IChatCustomizationInfo[]>;
+	/** Does the one step that makes a customization ready for the session, and returns its state afterwards. */
+	$fixChatCustomization(session: UriComponents, id: string): Promise<ChatCustomizationState>;
+	/** Starts forwarding changes. The extension host calls it once, when its event gets a first listener. */
+	$startListening(): void;
+}
+
+export interface ExtHostChatCustomizationsShape {
+	$onDidChangeChatCustomizations(): void;
+}
+
 export interface MainThreadChatSessionsShape extends IDisposable {
 	$registerChatSessionItemController(controllerHandle: number, chatSessionType: string, supportsResolve: boolean): void;
 	$updateChatSessionItemControllerCapabilities(controllerHandle: number, supportsResolve: boolean): void;
@@ -4433,6 +4449,7 @@ export const MainContext = {
 	MainThreadChatSessions: createProxyIdentifier<MainThreadChatSessionsShape>('MainThreadChatSessions'),
 	MainThreadChatSessionObserver: createProxyIdentifier<MainThreadChatSessionObserverShape>('MainThreadChatSessionObserver'),
 	MainThreadUserActivity: createProxyIdentifier<MainThreadUserActivityShape>('MainThreadUserActivity'),
+	MainThreadChatCustomizations: createProxyIdentifier<MainThreadChatCustomizationsShape>('MainThreadChatCustomizations'),
 	MainThreadChatOutputRenderer: createProxyIdentifier<MainThreadChatOutputRendererShape>('MainThreadChatOutputRenderer'),
 	MainThreadChatContext: createProxyIdentifier<MainThreadChatContextShape>('MainThreadChatContext'),
 	MainThreadChatDebug: createProxyIdentifier<MainThreadChatDebugShape>('MainThreadChatDebug'),
@@ -4522,6 +4539,7 @@ export const ExtHostContext = {
 	ExtHostChatSessions: createProxyIdentifier<ExtHostChatSessionsShape>('ExtHostChatSessions'),
 	ExtHostChatSessionObserver: createProxyIdentifier<ExtHostChatSessionObserverShape>('ExtHostChatSessionObserver'),
 	ExtHostUserActivity: createProxyIdentifier<ExtHostUserActivityShape>('ExtHostUserActivity'),
+	ExtHostChatCustomizations: createProxyIdentifier<ExtHostChatCustomizationsShape>('ExtHostChatCustomizations'),
 	ExtHostChatQuota: createProxyIdentifier<ExtHostChatQuotaShape>('ExtHostChatQuota'),
 	ExtHostGitExtension: createProxyIdentifier<ExtHostGitExtensionShape>('ExtHostGitExtension'),
 	ExtHostBrowsers: createProxyIdentifier<ExtHostBrowsersShape>('ExtHostBrowsers'),

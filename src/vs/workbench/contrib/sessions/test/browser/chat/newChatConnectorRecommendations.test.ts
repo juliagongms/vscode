@@ -115,6 +115,13 @@ suite('NewChatConnectorRecommendations', () => {
 		}]);
 	});
 
+	test('shows no icon for a recommendation without an icon URL', () => {
+		const fixture = setup({ productRecommendations: { linear: { ...connectorRecommendations.linear, iconUrl: '' } } });
+		fixture.setInput('Open https://linear.app/acme/issue/ENG-1');
+
+		assert.deepStrictEqual({ id: fixture.provider.provideTip()?.id, icon: fixture.provider.provideTip()?.icon }, { id: 'connectorRecommendation.linear', icon: undefined });
+	});
+
 	test('triggers the recommendation experiment only for the default value', () => {
 		assert.deepStrictEqual([
 			setup().telemetryService.triggers,
