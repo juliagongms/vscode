@@ -9,6 +9,7 @@ import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { localize } from '../../../../../nls.js';
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
 import { InstantiationType, registerSingleton } from '../../../../../platform/instantiation/common/extensions.js';
+import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../../platform/configuration/common/configurationRegistry.js';
 import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../common/contributions.js';
 import { Extensions as ViewExtensions, ICustomViewDescriptor, IViewContainersRegistry, IViewsRegistry, WindowEnablement } from '../../../../common/views.js';
@@ -25,6 +26,27 @@ import { ChatViewContainerId, IChatWidget, IChatWidgetService } from '../chat.js
 import { ChatDraftRequestService } from './chatDraftRequestService.js';
 import { ChatInputSuggestionService } from './chatInputSuggestionService.js';
 import { ChatSessionObserverService } from './chatSessionObserverService.js';
+
+/**
+ * The feature flag for Next Action Prediction (NAP), the built-in extension `nap.nap-focus` that drafts the next message
+ * to an agent session and steers sessions while they run. Off by default, so the build can carry NAP while it is
+ * dogfooded, and experiments can turn it on at startup. NAP reads it and stays dormant while it is off.
+ */
+export const NextActionPredictionEnabledSettingId = 'chat.nextActionPrediction.enabled';
+
+Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
+	id: 'chat',
+	properties: {
+		[NextActionPredictionEnabledSettingId]: {
+			type: 'boolean',
+			markdownDescription: localize('chat.nextActionPrediction.enabled', "Enable Next Action Prediction, which drafts the next message to your agent sessions and suggests a correction while they run. Takes effect after a reload."),
+			default: false,
+			scope: ConfigurationScope.APPLICATION,
+			tags: ['experimental'],
+			experiment: { mode: 'startup' },
+		},
+	},
+});
 
 registerSingleton(IChatSessionObserverService, ChatSessionObserverService, InstantiationType.Delayed);
 registerSingleton(IChatDraftRequestService, ChatDraftRequestService, InstantiationType.Delayed);
