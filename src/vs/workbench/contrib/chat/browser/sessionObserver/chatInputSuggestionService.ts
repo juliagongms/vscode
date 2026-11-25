@@ -58,6 +58,10 @@ interface ISuggestionItem extends InlineCompletion {
 	readonly suggestionId: string;
 	readonly session: URI;
 	readonly prefixLength: number;
+	/** The words this input offers: the whole suggestion in the chat input, a question's own in its answer box. */
+	readonly text: string;
+	/** Whether the input is a question's answer box, not the chat input. */
+	readonly answerBox: boolean;
 }
 
 interface ISuggestionList extends InlineCompletions<ISuggestionItem> {
@@ -470,12 +474,15 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 			suggestionId: entry.suggestion.id,
 			session,
 			prefixLength: current.length,
+			text,
+			answerBox: !!answerSession,
 		};
 		return { items: [item], enableForwardStability: true };
 	}
 
 	private onShown(item: ISuggestionItem): void {
-		if (!getChatQuestionAnswerSessionResource(item.session) && this.entries.has(item.session)) {
+		// Only ghost text in the chat input hides its placeholder: an answer box's leaves the chat input as it was.
+		if (!item.answerBox && this.entries.has(item.session)) {
 			this.markShown(item.session, true);
 		}
 		const e = this.entries.get(item.session);
@@ -489,7 +496,7 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		const e = this.entries.get(item.session);
 		if (e && e.suggestion.id === item.suggestionId) {
 			const accepted = Math.max(0, chars);
-			e.accepted = { chars: accepted, text: suggestionText(e.suggestion).slice(0, item.prefixLength + accepted) };
+			e.accepted = { chars: accepted, text: item.text.slice(0, item.prefixLength + accepted) };
 			this.fire(item.session, e, partial ? 'partiallyAccepted' : 'accepted', { acceptedChars: accepted });
 		}
 	}
@@ -499,11 +506,11 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		if (!e || e.suggestion.id !== item.suggestionId) {
 			return;
 		}
-		if (reason.kind !== InlineCompletionEndOfLifeReasonKind.Ignored) {
+		if (reason.kind !== InlineCompletionEndOfLifeReasonKind.Ignored && !item.answerBox) {
 			this.markShown(item.session, false);
 		}
 		if (reason.kind === InlineCompletionEndOfLifeReasonKind.Accepted) {
-			this.onAccepted(item, suggestionText(e.suggestion).length - item.prefixLength, false);
+			this.onAccepted(item, item.text.length - item.prefixLength, false);
 		} else if (reason.kind === InlineCompletionEndOfLifeReasonKind.Rejected) {
 			e.dismissed = true;
 			this.fire(item.session, e, 'rejected');
