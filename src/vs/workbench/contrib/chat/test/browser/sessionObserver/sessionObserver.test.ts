@@ -209,6 +209,26 @@ suite('chatSessionObserver', () => {
 		assert.strictEqual(service.getSuggestion(session), undefined);
 	});
 
+	test('answer surfaces: each question\'s answer box gets its own words, and a multi-question answer accepts by its picks', async () => {
+		const session = URI.parse('agent-host-copilotcli:/s7');
+		const { service, states, provide } = suggestionHarness(session);
+		const box = (fragment: string) => store.add(createTextModel('', null, undefined, URI.from({ scheme: CHAT_QUESTION_ANSWER_SCHEME, path: `/${fragment}`, query: session.toString(), fragment })));
+		const [first, second] = [box('q0of2'), box('q1of2')];
+		service.setSuggestion('ext', session, { id: 'm1', answer: { questionId: 'c1', questions: [{ selectedOptions: ['Weekly'] }, { freeform: 'Personal' }] } });
+		const claim = service.claimAnswerSurface(session);
+		assert.strictEqual(await provide(first), undefined, 'the first question is a pick, with no words');
+		assert.strictEqual((await provide(second))?.insertText, 'Personal');
+
+		// One answer for a whole carousel of several questions can't say which box its words are for.
+		service.setSuggestion('ext', session, { id: 'm2', answer: { questionId: 'c1', freeform: 'Weekly; Personal' } });
+		assert.strictEqual(await provide(second), undefined);
+
+		service.setSuggestion('ext', session, { id: 'm3', answer: { questionId: 'c1', questions: [{ selectedOptions: ['Weekly'] }, { freeform: 'Personal' }] } });
+		service.reportAnswer(session, { kind: 'answer', selected: ['Weekly'], text: 'Personal' });
+		claim.dispose();
+		assert.deepStrictEqual(states.filter(s => s.state === 'accepted').map(s => [s.id, s.selectedOptions?.join()]), [['m3', 'Weekly']]);
+	});
+
 	test('answer surfaces: suggested feedback taken in with Tab and then rewritten still links the decision', () => {
 		const session = URI.parse('agent-host-codex:/s3');
 		const { service, states, submissions } = suggestionHarness(session);

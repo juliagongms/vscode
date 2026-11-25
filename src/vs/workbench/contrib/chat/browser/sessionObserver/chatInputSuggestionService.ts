@@ -21,9 +21,9 @@ import { ILanguageFeaturesService } from '../../../../../editor/common/services/
 import { IModelService } from '../../../../../editor/common/services/model.js';
 import { InlineCompletionsController } from '../../../../../editor/contrib/inlineCompletions/browser/controller/inlineCompletionsController.js';
 import { ChatRequestQueueKind, IChatService } from '../../common/chatService/chatService.js';
-import { ActiveChatSessionHost, ChatInputSuggestionState, IChatDraftRequestService, IChatInputSuggestion, IChatInputSuggestionEvent, IChatInputSuggestionService, IChatRequestSubmission, IChatSessionObserverService } from '../../common/sessionObserver/chatSessionObserver.js';
+import { ActiveChatSessionHost, ChatInputSuggestionState, IChatDraftRequestService, IChatInputSuggestion, IChatInputSuggestionEvent, IChatInputSuggestionService, IChatRequestSubmission, IChatSessionObserverService, suggestedAnswerForQuestion } from '../../common/sessionObserver/chatSessionObserver.js';
 import { IChatWidget, IChatWidgetService } from '../chat.js';
-import { CHAT_QUESTION_ANSWER_SCHEME, getChatQuestionAnswerSessionResource } from '../widget/chatContentParts/chatQuestionAnswerEditor.js';
+import { CHAT_QUESTION_ANSWER_SCHEME, getChatQuestionAnswerQuestion, getChatQuestionAnswerSessionResource } from '../widget/chatContentParts/chatQuestionAnswerEditor.js';
 import { chatInputInlineCompletionsSetting } from '../widget/input/editor/chatInputInlineSuggestions.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { KeyCode } from '../../../../../base/common/keyCodes.js';
@@ -66,13 +66,30 @@ interface ISuggestionList extends InlineCompletions<ISuggestionItem> {
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trimStart().toLowerCase();
 
-/** The ghost text: the suggested message, or for an answer, the picked options and any added words. */
+/** The ghost text: the suggested message, or for an answer, the picked options and any added words, a line per question. */
 function suggestionText(s: IChatInputSuggestion): string {
 	if (s.text) {
 		return s.text;
 	}
 	const a = s.answer;
-	return a ? [a.selectedOptions?.join(', '), a.freeform].filter(Boolean).join(' — ') : '';
+	const line = (q: { readonly selectedOptions?: readonly string[]; readonly freeform?: string }) => [q.selectedOptions?.join(', '), q.freeform].filter(Boolean).join(' — ');
+	return a ? (a.questions ? a.questions.map(line).filter(Boolean).join('\n') : line(a)) : '';
+}
+
+/** Every option a suggested answer picks, across its questions. */
+function pickedOptions(a: IChatInputSuggestion['answer']): readonly string[] {
+	return a?.questions ? a.questions.flatMap(q => q.selectedOptions ?? []) : a?.selectedOptions ?? [];
+}
+
+/** A suggested answer's own words, across its questions, in their order. */
+function answerWords(a: IChatInputSuggestion['answer']): string {
+	return a?.questions ? a.questions.map(q => q.freeform).filter(Boolean).join('\n') : a?.freeform ?? '';
+}
+
+/** The words a suggested answer offers the answer box backed by `uri`: its question's, or the whole answer's. */
+function answerBoxText(a: IChatInputSuggestion['answer'], uri: URI): string | undefined {
+	const q = getChatQuestionAnswerQuestion(uri);
+	return q ? suggestedAnswerForQuestion(a, q.index, q.count)?.freeform : a?.freeform;
 }
 
 /**
@@ -317,23 +334,24 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 	private takes(session: URI, next: IChatInputSuggestion, prev: IEntry | undefined): boolean {
 		// An answer goes in the question's answer box while it shows; anything else in the chat input.
 		const inAnswerBox = !!next.answer && this.answerSurfaces.has(session);
+		// Each answer box is held to its own question's words.
 		const typed = (inAnswerBox
-			? this.modelService.getModels().filter(m => getChatQuestionAnswerSessionResource(m.uri)?.toString() === session.toString()).map(m => m.getValue())
-			: this.chatWidgetService.getAllWidgets().filter(w => w.viewModel?.sessionResource.toString() === session.toString()).map(w => w.inputEditor.getModel()?.getValue() ?? '')
-		).filter(t => t.trim());
+			? this.modelService.getModels().filter(m => getChatQuestionAnswerSessionResource(m.uri)?.toString() === session.toString()).map(m => ({ text: m.getValue(), uri: m.uri }))
+			: this.chatWidgetService.getAllWidgets().filter(w => w.viewModel?.sessionResource.toString() === session.toString()).map(w => ({ text: w.inputEditor.getModel()?.getValue() ?? '', uri: undefined }))
+		).filter(t => t.text.trim());
 		if (!typed.length) {
 			return true;
 		}
-		const textOf = (s: IChatInputSuggestion) => norm(inAnswerBox ? s.answer?.freeform ?? '' : suggestionText(s));
-		if (!typed.every(t => textOf(next).startsWith(norm(t)))) {
+		const textOf = (s: IChatInputSuggestion, uri: URI | undefined) => norm(uri ? answerBoxText(s.answer, uri) ?? '' : suggestionText(s));
+		if (!typed.every(t => textOf(next, t.uri).startsWith(norm(t.text)))) {
 			return false;
 		}
 		if (!prev || prev.dismissed) {
 			return true;
 		}
 		// Taken in with Tab: theirs while the input still holds it (as a submission links to it), not once they cleared it.
-		const editingTaken = !!prev.accepted && typed.every(t => norm(t).startsWith(norm(prev.accepted!.text).slice(0, Math.max(1, Math.min(prev.accepted!.chars, 20)))));
-		return !editingTaken && !typed.every(t => textOf(prev.suggestion).startsWith(norm(t)));
+		const editingTaken = !!prev.accepted && typed.every(t => norm(t.text).startsWith(norm(prev.accepted!.text).slice(0, Math.max(1, Math.min(prev.accepted!.chars, 20)))));
+		return !editingTaken && !typed.every(t => textOf(prev.suggestion, t.uri).startsWith(norm(t.text)));
 	}
 
 	getSuggestion(session: URI): (IChatInputSuggestion & { readonly owner: string }) | undefined {
@@ -358,17 +376,18 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 	reportAnswer(session: URI, answer: { readonly kind: 'answer' | 'planDecision'; readonly selected: readonly string[]; readonly text: string }): void {
 		const entry = this.entries.get(session);
 		const suggested = entry?.suggestion.answer;
-		const sameOptions = !!suggested?.selectedOptions?.length
-			&& suggested.selectedOptions.length === answer.selected.length && suggested.selectedOptions.every(o => answer.selected.includes(o));
-		const keptText = !!suggested?.freeform && !!answer.text && norm(answer.text).startsWith(norm(suggested.freeform).slice(0, 20));
+		const picks = pickedOptions(suggested);
+		const words = answerWords(suggested);
+		const sameOptions = picks.length > 0 && picks.length === answer.selected.length && picks.every(o => answer.selected.includes(o));
+		const keptText = !!words && !!answer.text && norm(answer.text).startsWith(norm(words).slice(0, 20));
 		const accepted = !!entry && !!suggested && (sameOptions || keptText);
 		if (entry && accepted && !entry.accepted) {
-			this.fire(session, entry, 'accepted', { acceptedChars: keptText ? suggested!.freeform!.length : 0, selectedOptions: answer.selected });
+			this.fire(session, entry, 'accepted', { acceptedChars: keptText ? words.length : 0, selectedOptions: answer.selected });
 		}
 		const text = [answer.selected.join(', '), answer.text].filter(Boolean).join(' — ');
 		// Linked when it matches the suggestion, or when its text was taken in (Tab) and then edited.
 		const linked = entry && (accepted || entry.accepted);
-		const acceptedChars = entry?.accepted?.chars ?? (keptText ? suggested!.freeform!.length : 0);
+		const acceptedChars = entry?.accepted?.chars ?? (keptText ? words.length : 0);
 		this._onDidSubmitRequest.fire({
 			session, requestId: generateUuid(), text, kind: answer.kind, host: this.hostFor(session),
 			...(linked ? { fromSuggestion: { id: entry.suggestion.id, owner: entry.owner, acceptedChars } } : {}),
@@ -391,8 +410,9 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 			}
 			return;
 		}
-		const chars = acceptedChars ?? e.suggestion.answer.freeform?.length ?? 0;
-		e.accepted = { chars, text: e.suggestion.answer.freeform?.slice(0, chars) ?? '' };
+		const words = answerWords(e.suggestion.answer);
+		const chars = acceptedChars ?? words.length;
+		e.accepted = { chars, text: words.slice(0, chars) };
 		this.fire(session, e, 'accepted', { acceptedChars: chars });
 	}
 
@@ -416,7 +436,7 @@ export class ChatInputSuggestionService extends Disposable implements IChatInput
 		if (answerSession) {
 			session = answerSession;
 			entry = this.entries.get(session);
-			text = entry?.suggestion.answer?.freeform;
+			text = answerBoxText(entry?.suggestion.answer, model.uri);
 		} else {
 			const widget = this.widgetFor(model);
 			session = widget?.viewModel?.sessionResource;
